@@ -1,9 +1,11 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -15,6 +17,9 @@ import (
 	"github.com/gorilla/websocket"
 	tele "gopkg.in/telebot.v3"
 )
+
+//go:embed dist/*
+var frontendFiles embed.FS
 
 // Message 定义了各个端之间通信的标准数据包格式
 type Message struct {
@@ -52,13 +57,22 @@ func main() {
 	// 2. 注册路由
 	http.HandleFunc("/ws/agent", handleAgentWS)
 	http.HandleFunc("/ws/web", handleWebWS)
-	http.Handle("/", http.FileServer(http.Dir("./master/static")))
+	registerFrontend()
 
 	// 3. 启动服务
 	fmt.Printf("[Master] 服务端已启动，Web 面板访问地址: http://%s:8080\n", publicIPv4())
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal("服务启动失败:", err)
 	}
+}
+
+func registerFrontend() {
+	distFS, err := fs.Sub(frontendFiles, "dist")
+	if err != nil {
+		log.Fatal("前端资源加载失败:", err)
+	}
+
+	http.Handle("/", http.FileServer(http.FS(distFS)))
 }
 
 func publicIPv4() string {
@@ -154,6 +168,7 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 				// 收到命令执行结果，回传给 TG 或 Web
 				logStr := fmt.Sprintf("[%s] %s", msg.AgentID, msg.Data)
 				fmt.Println(logStr)
+				broadcastToWeb(msgBytes)
 				// 如果配置了TG，则发送给TG控制者 (此处为广播给TG，实际生产可针对特定 ChatID 回复)
 				// 注意：这里为了自测方便不强制校验 ChatID，请在生产环境增加权限验证
 			}
@@ -179,10 +194,24 @@ func handleWebWS(w http.ResponseWriter, r *http.Request) {
 	webConns[conn] = true
 	webMutex.Unlock()
 
-	// 阻塞保持连接
+	// 监听前端大屏发来的操作指令
 	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
+		_, msgBytes, err := conn.ReadMessage()
+		if err != nil {
 			break
+		}
+
+		var msg Message
+		if err := json.Unmarshal(msgBytes, &msg); err != nil {
+			continue
+		}
+		if msg.Type == "cmd" {
+			agentMutex.RLock()
+			agentConn, exists := agentConns[msg.AgentID]
+			agentMutex.RUnlock()
+			if exists {
+				agentConn.WriteMessage(websocket.TextMessage, msgBytes)
+			}
 		}
 	}
 

@@ -14,7 +14,7 @@ install_env() {
 
   # 安装基础依赖
   apt-get update
-  apt-get install -y git wget curl tar
+  apt-get install -y git wget curl tar nodejs npm
 
   # 自动检测架构并安装对应版本的 Go (如果系统未安装 Go)
   if ! command -v go &> /dev/null; then
@@ -60,9 +60,22 @@ install_env() {
 
   go get github.com/gorilla/websocket
   go get github.com/shirou/gopsutil/v3/cpu
+  go get github.com/shirou/gopsutil/v3/disk
+  go get github.com/shirou/gopsutil/v3/host
+  go get github.com/shirou/gopsutil/v3/load
   go get github.com/shirou/gopsutil/v3/mem
+  go get github.com/shirou/gopsutil/v3/net
   go get gopkg.in/telebot.v3
   go mod tidy
+
+  echo "开始构建前端资源..."
+  if ! command -v pnpm &> /dev/null; then
+    npm install -g pnpm
+  fi
+  cd "$APP_DIR/web"
+  pnpm install
+  pnpm build
+  cd "$APP_DIR"
 
   mkdir -p master/static
   mkdir -p agent
