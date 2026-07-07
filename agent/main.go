@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/url"
 	"os/exec"
 	"time"
@@ -51,7 +50,7 @@ func connectAndServe() error {
 		for {
 			cpuPercent, _ := cpu.Percent(0, false)
 			memInfo, _ := mem.VirtualMemory()
-			
+
 			cpuVal := 0.0
 			if len(cpuPercent) > 0 {
 				cpuVal = cpuPercent[0]
@@ -65,7 +64,7 @@ func connectAndServe() error {
 
 			msg := Message{Type: "stat", AgentID: AgentID, Data: string(statBytes)}
 			conn.WriteJSON(msg)
-			
+
 			time.Sleep(2 * time.Second)
 		}
 	}()
@@ -88,12 +87,12 @@ func connectAndServe() error {
 // 异步执行命令并将输出流推回 Master
 func executeCommand(conn *websocket.Conn, command string) {
 	cmd := exec.Command("sh", "-c", command)
-	
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return
 	}
-	cmd.Stderr = cmd.Stdout 
+	cmd.Stderr = cmd.Stdout
 
 	if err := cmd.Start(); err != nil {
 		return

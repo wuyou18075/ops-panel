@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -25,7 +27,7 @@ var (
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
-	
+
 	// Agent 连接池 (AgentID -> WebSocket)
 	agentConns = make(map[string]*websocket.Conn)
 	agentMutex sync.RWMutex
@@ -33,7 +35,7 @@ var (
 	// Web 前端大屏连接池
 	webConns = make(map[*websocket.Conn]bool)
 	webMutex sync.RWMutex
-	
+
 	// TG Bot 实例
 	bot *tele.Bot
 )
@@ -53,10 +55,67 @@ func main() {
 	http.Handle("/", http.FileServer(http.Dir("./master/static")))
 
 	// 3. 启动服务
-	fmt.Println("[Master] 服务端已启动，Web 面板访问地址: http://0.0.0.0:8080")
+	fmt.Printf("[Master] 服务端已启动，Web 面板访问地址: http://%s:8080\n", publicIPv4())
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal("服务启动失败:", err)
 	}
+}
+
+func publicIPv4() string {
+	if ip := fetchPublicIPv4(); ip != "" {
+		return ip
+	}
+	if ip := localIPv4(); ip != "" {
+		return ip
+	}
+	return "127.0.0.1"
+}
+
+func fetchPublicIPv4() string {
+	client := http.Client{Timeout: 2 * time.Second}
+	endpoints := []string{
+		"https://api.ipify.org",
+		"https://ifconfig.me/ip",
+	}
+
+	for _, endpoint := range endpoints {
+		resp, err := client.Get(endpoint)
+		if err != nil {
+			continue
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil || resp.StatusCode != http.StatusOK {
+			continue
+		}
+
+		ip := strings.TrimSpace(string(body))
+		parsed := net.ParseIP(ip)
+		if parsed != nil && parsed.To4() != nil {
+			return ip
+		}
+	}
+
+	return ""
+}
+
+func localIPv4() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok || ipNet.IP.IsLoopback() {
+			continue
+		}
+		if ip := ipNet.IP.To4(); ip != nil {
+			return ip.String()
+		}
+	}
+
+	return ""
 }
 
 // 处理 Agent 端的 WebSocket 连接
@@ -159,7 +218,7 @@ func initTGBot(token string) {
 		if len(args) < 2 {
 			return c.Send("格式错误，请使用: /cmd <agent_id> <命令>")
 		}
-		
+
 		targetAgent := args[0]
 		cmdStr := strings.Join(args[1:], " ")
 
@@ -174,7 +233,7 @@ func initTGBot(token string) {
 		// 封包并下发命令给 Agent
 		req := Message{Type: "cmd", AgentID: targetAgent, Data: cmdStr}
 		reqBytes, _ := json.Marshal(req)
-		
+
 		err := agentConn.WriteMessage(websocket.TextMessage, reqBytes)
 		if err != nil {
 			return c.Send("❌ 命令发送失败")

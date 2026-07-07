@@ -148,41 +148,65 @@ uninstall_all() {
   echo "=== 所有组件与环境已完全卸载 ==="
 }
 
+pause_and_return() {
+  echo
+  read -r -p "按回车返回主菜单..."
+}
+
+show_menu() {
+  clear
+  echo "======================================"
+  echo "      一键脚本面板管理工具            "
+  echo "======================================"
+  echo "  1. 安装环境 (Go, Git, 依赖与代码)   "
+  echo "  2. 启动控制端 (Master)              "
+  echo "  3. 注册受控端 (Agent)               "
+  echo "  4. 拉取最新代码                    "
+  echo "  60. 删除本地代码                   "
+  echo "  99. 卸载所有                       "
+  echo "  0. 退出                            "
+  echo "======================================"
+}
+
 # ==========================================
 # 主菜单
 # ==========================================
-echo "======================================"
-echo "      一键脚本面板管理工具            "
-echo "======================================"
-echo "  1. 安装环境 (Go, Git, 依赖与代码)   "
-echo "  2. 启动控制端 (Master)              "
-echo "  3. 注册受控端 (Agent)               "
-echo "  4. 拉取最新代码                    "
-echo "  60. 删除本地代码                   "
-echo "  99. 卸载所有                       "
-echo "======================================"
-read -p "请输入序号选择对应的操作: " choice
+while true; do
+  show_menu
+  read -r -p "请输入序号选择对应的操作: " choice
 
-case $choice in
-  1)
-    install_env
-    ;;
-  2)
-    start_master
-    ;;
-  3)
-    start_agent
-    ;;
-  4)
-    pull_latest
-    ;;
-  60)
-    delete_local_code
-    ;;
-  99)
-    uninstall_all
-    ;;
-  *)
-    echo "输入无效，脚本已退出。"
-    ;;
-esac
+  case $choice in
+    1)
+      install_env
+      pause_and_return
+      ;;
+    2)
+      start_master
+      pause_and_return
+      ;;
+    3)
+      start_agent
+      pause_and_return
+      ;;
+    4)
+      pull_latest
+      pause_and_return
+      ;;
+    60)
+      delete_local_code
+      pause_and_return
+      ;;
+    99)
+      uninstall_all
+      pause_and_return
+      ;;
+    0)
+      echo "脚本已退出。"
+      exit 0
+      ;;
+    *)
+      echo "输入无效，请重新选择。"
+      pause_and_return
+      ;;
+  esac
+done
