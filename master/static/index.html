@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>分布式节点大屏</title>
+    <style>
+        body { background: #121212; color: #e0e0e0; font-family: Arial, sans-serif; padding: 20px; }
+        .grid { display: flex; flex-wrap: wrap; gap: 20px; }
+        .card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 20px; width: 300px; }
+        .card h3 { margin-top: 0; color: #4CAF50; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        .stat-row { display: flex; justify-content: space-between; margin: 10px 0; }
+        .progress-bg { background: #333; border-radius: 4px; height: 10px; width: 100%; margin-top: 5px; }
+        .progress-bar { background: #4CAF50; height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+    </style>
+</head>
+<body>
+    <h2>🚀 实时集群监控大屏</h2>
+    <div class="grid" id="node-container">
+        </div>
+
+    <script>
+        // 存储节点数据的字典
+        const nodes = {};
+
+        function connectWS() {
+            const ws = new WebSocket("ws://" + window.location.host + "/ws/web");
+            
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === "stat") {
+                    const statData = JSON.parse(msg.data);
+                    updateNodeCard(msg.agent_id, statData);
+                }
+            };
+
+            ws.onclose = () => {
+                setTimeout(connectWS, 3000); // 断线重连
+            };
+        }
+
+        function updateNodeCard(agentId, data) {
+            let container = document.getElementById("node-container");
+            let cardId = "card-" + agentId;
+            let card = document.getElementById(cardId);
+
+            // CPU 和 内存的百分比
+            let cpuUsage = data.cpu.toFixed(2);
+            let memUsage = data.mem.toFixed(2);
+
+            if (!card) {
+                // 如果是新节点，创建卡片
+                card = document.createElement("div");
+                card.className = "card";
+                card.id = cardId;
+                container.appendChild(card);
+            }
+
+            // 更新卡片内容
+            card.innerHTML = `
+                <h3>🖥️ 节点: ${agentId}</h3>
+                <div class="stat-row"><span>CPU 使用率</span><span>${cpuUsage}%</span></div>
+                <div class="progress-bg"><div class="progress-bar" style="width: ${cpuUsage}%; background: ${cpuUsage > 80 ? 'red' : '#4CAF50'}"></div></div>
+                <br>
+                <div class="stat-row"><span>内存使用率</span><span>${memUsage}%</span></div>
+                <div class="progress-bg"><div class="progress-bar" style="width: ${memUsage}%; background: ${memUsage > 80 ? 'red' : '#2196F3'}"></div></div>
+            `;
+        }
+
+        // 启动连接
+        connectWS();
+    </script>
+</body>
+</html>
