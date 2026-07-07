@@ -5,6 +5,36 @@ set -euo pipefail
 APP_DIR="/opt/ops-panel"
 GO_VERSION="1.21.6"
 MODULE_PATH="github.com/wuyou18075/ops-panel"
+NODE_MIN_VERSION="22.13.0"
+
+version_ge() {
+  current="$1"
+  required="$2"
+  [ "$(printf '%s\n%s\n' "$required" "$current" | sort -V | head -n 1)" = "$required" ]
+}
+
+ensure_latest_node() {
+  if ! command -v node &> /dev/null; then
+    echo "未检测到 Node.js，准备安装最新版..."
+    npm install -g n
+    n latest
+    export PATH="/usr/local/bin:$PATH"
+    hash -r
+    return
+  fi
+
+  current_node_version="$(node -v | sed 's/^v//')"
+  if version_ge "$current_node_version" "$NODE_MIN_VERSION"; then
+    echo "Node.js 版本满足要求: v$current_node_version"
+    return
+  fi
+
+  echo "Node.js 版本过低: v$current_node_version，最低要求: v$NODE_MIN_VERSION，准备升级到最新版..."
+  npm install -g n
+  n latest
+  export PATH="/usr/local/bin:$PATH"
+  hash -r
+}
 
 # ==========================================
 # 1. 安装环境功能
@@ -43,11 +73,7 @@ install_env() {
   # 确保当前会话能用到 go 命令
   export PATH="$PATH:/usr/local/go/bin"
 
-  echo "正在升级 Node.js 到最新版本..."
-  npm install -g n
-  n latest
-  export PATH="/usr/local/bin:$PATH"
-  hash -r
+  ensure_latest_node
   echo "Node.js 版本: $(node -v)"
   echo "npm 版本: $(npm -v)"
 

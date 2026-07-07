@@ -26,8 +26,18 @@ if ! grep -q "按回车返回主菜单" "$SCRIPT_PATH"; then
   exit 1
 fi
 
-if ! grep -q "n latest" "$SCRIPT_PATH"; then
-  echo "install.sh must upgrade Node.js to the latest version before installing pnpm" >&2
+if ! grep -q 'NODE_MIN_VERSION="22.13.0"' "$SCRIPT_PATH"; then
+  echo "install.sh must define the minimum Node.js version required by latest pnpm" >&2
+  exit 1
+fi
+
+if ! grep -q "version_ge()" "$SCRIPT_PATH"; then
+  echo "install.sh must compare Node.js versions before upgrading" >&2
+  exit 1
+fi
+
+if ! grep -q "ensure_latest_node" "$SCRIPT_PATH"; then
+  echo "install.sh must upgrade Node.js only when the local version is too old" >&2
   exit 1
 fi
 
