@@ -43,6 +43,14 @@ install_env() {
   # 确保当前会话能用到 go 命令
   export PATH="$PATH:/usr/local/go/bin"
 
+  echo "正在升级 Node.js 到最新版本..."
+  npm install -g n
+  n latest
+  export PATH="/usr/local/bin:$PATH"
+  hash -r
+  echo "Node.js 版本: $(node -v)"
+  echo "npm 版本: $(npm -v)"
+
   # 拉取 Git 仓库
   echo "正在从 Git 拉取项目文件..."
   if [ -d "$APP_DIR" ]; then
@@ -69,9 +77,8 @@ install_env() {
   go mod tidy
 
   echo "开始构建前端资源..."
-  if ! command -v pnpm &> /dev/null; then
-    npm install -g pnpm
-  fi
+  npm install -g pnpm
+  echo "pnpm 版本: $(pnpm -v)"
   cd "$APP_DIR/web"
   pnpm install
   pnpm build

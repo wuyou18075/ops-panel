@@ -25,3 +25,13 @@ if ! grep -q "按回车返回主菜单" "$SCRIPT_PATH"; then
   echo "install.sh must prompt Enter before returning to the menu" >&2
   exit 1
 fi
+
+if ! grep -q "n latest" "$SCRIPT_PATH"; then
+  echo "install.sh must upgrade Node.js to the latest version before installing pnpm" >&2
+  exit 1
+fi
+
+if ! grep -q "npm install -g pnpm" "$SCRIPT_PATH"; then
+  echo "install.sh must install the latest pnpm after upgrading Node.js" >&2
+  exit 1
+fi
