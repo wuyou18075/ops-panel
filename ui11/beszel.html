@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beszel - System Monitor</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:#111214;color:#d4d4d4;
+    min-height:100vh;padding:0;
+  }
+
+  /* ── Top bar ── */
+  .topbar{
+    display:flex;align-items:center;gap:18px;padding:0 24px;height:56px;
+    background:#17181b;border-bottom:1px solid #222;
+  }
+  .topbar .brand{font-size:17px;font-weight:700;color:#fff;display:flex;align-items:center;gap:10px;flex-shrink:0}
+  .topbar .brand .logo{
+    width:24px;height:24px;border-radius:6px;
+    background:linear-gradient(135deg,#6366f1,#a78bfa);
+  }
+  .topbar .search{
+    display:flex;align-items:center;gap:8px;
+    padding:6px 12px;border-radius:8px;background:#1e1f22;
+    border:1px solid #2a2a2e;font-size:13px;color:#888;
+    flex:1;max-width:480px;
+  }
+  .topbar .search .key{
+    padding:1px 6px;border-radius:4px;font-size:11px;
+    background:#26272b;border:1px solid #333;color:#aaa;
+    font-family:ui-monospace,Menlo,monospace;
+  }
+  .topbar .actions{display:flex;align-items:center;gap:14px;margin-left:auto;font-size:16px;color:#999}
+  .topbar .actions .item{cursor:pointer;transition:color .15s}
+  .topbar .actions .item:hover{color:#fff}
+  .topbar .actions .add{
+    padding:7px 14px;border-radius:8px;background:#6366f1;color:#fff;
+    font-size:13px;font-weight:600;cursor:pointer;
+  }
+
+  /* ── Header ── */
+  .header{
+    display:flex;align-items:flex-end;justify-content:space-between;
+    padding:24px 28px 14px;
+  }
+  .header h1{font-size:22px;color:#fff;font-weight:600}
+  .header p{font-size:12px;color:#777;margin-top:4px}
+  .header .controls{display:flex;gap:8px;align-items:center}
+  .header .controls input,.header .controls select{
+    padding:6px 12px;border-radius:7px;background:#1e1f22;
+    border:1px solid #2a2a2e;font-size:13px;color:#ccc;outline:none;
+  }
+  .header .controls input::placeholder{color:#666}
+  .header .controls select{cursor:pointer;color:#ccc}
+
+  /* ── Table ── */
+  .table{padding:0 28px}
+  .row{
+    display:grid;
+    grid-template-columns:1.6fr .9fr 1.1fr 1.1fr .7fr .9fr auto;
+    align-items:center;gap:14px;
+    padding:10px 14px;border-radius:8px;
+    font-size:13px;
+  }
+  .row + .row{border-top:1px solid #1c1d20}
+  .row:not(.head):hover{background:rgba(255,255,255,.03)}
+  .row.head{
+    font-size:12px;color:#666;padding-top:14px;
+    text-transform:uppercase;letter-spacing:.5px;
+  }
+  .row.head > div{display:flex;align-items:center;gap:5px}
+  .row.head .sort{color:#444;cursor:pointer}
+  .row.head .sort:hover{color:#888}
+
+  .name-cell{display:flex;align-items:center;gap:8px;color:#e0e0e0;font-weight:500}
+  .name-cell .dot{width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,.6)}
+  .name-cell .link{color:#555;font-size:12px;cursor:pointer}
+  .name-cell .link:hover{color:#888}
+
+  .cpu-cell{display:flex;align-items:center;gap:10px;color:#ccc}
+  .cpu-cell .pct{text-align:right;min-width:38px}
+
+  .meter{
+    height:8px;border-radius:4px;background:#1a1b1e;overflow:hidden;position:relative;flex:1;
+  }
+  .meter > i{display:block;height:100%;border-radius:4px}
+  .meter .g{background:linear-gradient(90deg,#22c55e,#16a34a)}
+  .meter .y{background:linear-gradient(90deg,#eab308,#f59e0b)}
+
+  .disk-cell,.mem-cell{display:flex;align-items:center;gap:10px;color:#ccc}
+  .disk-cell .pct,.mem-cell .pct{text-align:right;min-width:38px}
+
+  .net-cell{color:#888;font-variant-numeric:tabular-nums}
+
+  .agent-cell{display:flex;align-items:center;gap:6px;color:#ccc;font-size:12px}
+  .agent-cell .adot{width:6px;height:6px;border-radius:50%;background:#22c55e}
+
+  .icons{display:flex;align-items:center;gap:10px;color:#666}
+  .icons span{cursor:pointer;transition:color .15s}
+  .icons span:hover{color:#aaa}
+
+  /* ── Footer ── */
+  .footer{
+    text-align:center;padding:20px;font-size:11px;color:#444;
+  }
+
+  @media(max-width:900px){
+    .row{grid-template-columns:1.4fr .8fr 1fr 1fr .6fr .7fr auto;font-size:12px}
+    .header{flex-direction:column;align-items:flex-start;gap:10px}
+  }
+</style>
+</head>
+<body>
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="brand"><div class="logo"></div>Beszel</div>
+    <div class="search">
+      <span>🔍</span>
+      <span>Search</span>
+      <span class="key">⌘ K</span>
+    </div>
+    <div class="actions">
+      <span class="item" title="Language">🌐</span>
+      <span class="item" title="Theme">☀️</span>
+      <span class="item" title="Settings">⚙️</span>
+      <span class="item" title="User">👤</span>
+      <span class="add">+ Add System</span>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h1>All Systems</h1>
+      <p>Updated in real time. Click on a system to view information.</p>
+    </div>
+    <div class="controls">
+      <input type="text" placeholder="Filter...">
+      <select>
+        <option>Columns ▾</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table">
+    <div class="row head">
+      <div>System <span class="sort">⇅</span></div>
+      <div>CPU <span class="sort">⇅</span></div>
+      <div>Memory <span class="sort">⇅</span></div>
+      <div>Disk <span class="sort">⇅</span></div>
+      <div>Net <span class="sort">⇅</span></div>
+      <div>Agent</div>
+      <div></div>
+    </div>
+
+    <!-- bang-bang-bar -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>bang-bang-bar<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:2.8%"></i></div><span class="pct">2.8%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:39.3%"></i></div><span class="pct">39.3%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="g" style="width:41.7%"></i></div><span class="pct">41.7%</span></div>
+      <div class="net-cell">0.00 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- black-lodge -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>black-lodge<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:6.1%"></i></div><span class="pct">6.1%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:23.3%"></i></div><span class="pct">23.3%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="g" style="width:26.9%"></i></div><span class="pct">26.9%</span></div>
+      <div class="net-cell">0.02 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- double-r -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>double-r<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:3.5%"></i></div><span class="pct">3.5%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:21%"></i></div><span class="pct">21.0%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="g" style="width:46.6%"></i></div><span class="pct">46.6%</span></div>
+      <div class="net-cell">0.06 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- great-northern -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>great-northern<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:7%"></i></div><span class="pct">7.0%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:22.4%"></i></div><span class="pct">22.4%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="y" style="width:67.4%"></i></div><span class="pct">67.4%</span></div>
+      <div class="net-cell">0.05 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- jack-rabbits-palace -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>jack-rabbits-palace<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:1.6%"></i></div><span class="pct">1.6%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:26.1%"></i></div><span class="pct">26.1%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="g" style="width:48.7%"></i></div><span class="pct">48.7%</span></div>
+      <div class="net-cell">0.04 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- laura-palmer -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>laura-palmer<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:3.3%"></i></div><span class="pct">3.3%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:17.6%"></i></div><span class="pct">17.6%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="g" style="width:31.2%"></i></div><span class="pct">31.2%</span></div>
+      <div class="net-cell">0.01 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- localhost -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>localhost<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:2%"></i></div><span class="pct">2.0%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:22.5%"></i></div><span class="pct">22.5%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="y" style="width:70.7%"></i></div><span class="pct">70.7%</span></div>
+      <div class="net-cell">0.01 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- log-lady -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>log-lady<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:3.6%"></i></div><span class="pct">3.6%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:41%"></i></div><span class="pct">41.0%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="g" style="width:33.8%"></i></div><span class="pct">33.8%</span></div>
+      <div class="net-cell">0.00 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- one-eyed-jacks -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>one-eyed-jacks<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:1.4%"></i></div><span class="pct">1.4%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:32.3%"></i></div><span class="pct">32.3%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="g" style="width:55.3%"></i></div><span class="pct">55.3%</span></div>
+      <div class="net-cell">0.00 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- owl-cave -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>owl-cave<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:4.9%"></i></div><span class="pct">4.9%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:31.7%"></i></div><span class="pct">31.7%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="g" style="width:29.2%"></i></div><span class="pct">29.2%</span></div>
+      <div class="net-cell">0.00 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- red-room -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>red-room<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:0.8%"></i></div><span class="pct">0.8%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:38%"></i></div><span class="pct">38.0%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="g" style="width:57.9%"></i></div><span class="pct">57.9%</span></div>
+      <div class="net-cell">0.00 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+
+    <!-- white-lodge -->
+    <div class="row">
+      <div class="name-cell"><span class="dot"></span>white-lodge<span class="link">↗</span></div>
+      <div class="cpu-cell"><div class="meter"><i class="g" style="width:2.2%"></i></div><span class="pct">2.2%</span></div>
+      <div class="mem-cell"><div class="meter"><i class="g" style="width:29.2%"></i></div><span class="pct">29.2%</span></div>
+      <div class="disk-cell"><div class="meter"><i class="g" style="width:19.8%"></i></div><span class="pct">19.8%</span></div>
+      <div class="net-cell">0.00 MB/s</div>
+      <div class="agent-cell"><span class="adot"></span>0.8.0</div>
+      <div class="icons"><span>🔔</span><span>⋯</span></div>
+    </div>
+  </div>
+
+  <div class="footer">Beszel · system monitoring dashboard</div>
+</body>
+</html>

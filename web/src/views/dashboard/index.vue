@@ -341,7 +341,7 @@ function fmtMem(v: number | undefined): string {
 }
 function fmtDisk(v: number | undefined): string {
   if (v == null) return "-";
-  if (v < 1073741824) return (v / 1048576).toFixed(0) + " GB";
+  if (v < 1073741824) return (v / 1048576).toFixed(0) + " MB";
   return (v / 1073741824).toFixed(1) + " GB";
 }
 

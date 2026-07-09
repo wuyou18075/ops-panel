@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Watcher - VPS Monitor</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    color:#2c3e50;
+    background:
+      url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600&q=80') center/cover no-repeat fixed;
+    min-height:100vh;
+    padding:18px;
+  }
+  .wrap{max-width:1400px;margin:0 auto}
+
+  /* ── Top nav bar ── */
+  .navbar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 22px;border-radius:14px;
+    background:rgba(255,255,255,.62);backdrop-filter:blur(16px);
+    margin-bottom:14px;
+  }
+  .navbar .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px}
+  .navbar .brand svg{width:24px;height:24px}
+  .navbar .nav-actions{display:flex;align-items:center;gap:14px;font-size:13px;color:#555}
+  .navbar .nav-actions span{display:flex;align-items:center;gap:4px}
+
+  /* ── Summary bar ── */
+  .summary{
+    display:grid;grid-template-columns:repeat(5,1fr);gap:0;
+    padding:16px 24px;border-radius:14px;
+    background:rgba(255,255,255,.62);backdrop-filter:blur(16px);
+    margin-bottom:14px;
+  }
+  .summary .item{text-align:center;border-right:1px solid rgba(0,0,0,.08)}
+  .summary .item:last-child{border-right:none}
+  .summary .label{font-size:12px;color:#888;margin-bottom:4px}
+  .summary .value{font-size:22px;font-weight:700;color:#2c3e50}
+  .summary .value small{font-size:13px;color:#999;margin-left:6px}
+  .summary .value .up{color:#27ae60}
+  .summary .value .down{color:#e74c3c}
+
+  /* ── Group tabs ── */
+  .tabs{
+    display:flex;gap:0;margin-bottom:14px;
+    padding:6px;border-radius:12px;
+    background:rgba(255,255,255,.55);backdrop-filter:blur(12px);
+    width:fit-content;
+  }
+  .tabs .tab{
+    padding:7px 18px;border-radius:9px;font-size:13px;cursor:pointer;color:#555;
+  }
+  .tabs .tab.active{background:#fff;color:#2c3e50;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+
+  /* ── Card grid ── */
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+
+  .card{
+    border-radius:16px;padding:16px;
+    background:rgba(255,255,255,.72);backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.6);
+    box-shadow:0 4px 20px rgba(0,0,0,.06);
+    transition:transform .15s, box-shadow .15s;
+  }
+  .card:hover{transform:translateY(-3px);box-shadow:0 8px 28px rgba(0,0,0,.12)}
+
+  .card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .card-head .name{font-weight:700;font-size:14px;display:flex;align-items:center;gap:6px}
+  .card-head .name img{width:18px;height:13px;border-radius:2px;object-fit:cover}
+  .card-head .star{color:#e74c3c;font-size:12px;cursor:pointer}
+  .price{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:11px;color:#777}
+  .price .now{color:#27ae60;font-weight:600;font-size:13px}
+  .price .badge{
+    padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600;
+    background:#fee;background:#e74c3c;color:#fff;
+  }
+
+  .specs{display:flex;gap:14px;font-size:12px;color:#555;margin-bottom:12px}
+  .specs span{display:flex;align-items:center;gap:3px}
+  .specs .dot{width:7px;height:7px;border-radius:50%;background:#2ecc71}
+
+  .metric{margin-bottom:7px}
+  .metric .row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px}
+  .metric .row .k{color:#888}
+  .metric .row .v{font-weight:600;color:#444}
+  .bar{
+    height:9px;border-radius:5px;background:rgba(0,0,0,.08);overflow:hidden;position:relative;
+  }
+  .bar > i{display:block;height:100%;border-radius:5px}
+  .bar .green{background:linear-gradient(90deg,#2ecc71,#27ae60)}
+  .bar .yellow{background:linear-gradient(90deg,#f1c40f,#e67e22)}
+
+  .net-info{
+    margin-top:10px;padding-top:10px;border-top:1px dashed rgba(0,0,0,.1);
+    font-size:11px;color:#666;line-height:1.7;
+  }
+  .net-info .line{display:flex;justify-content:space-between}
+  .net-info .line b{font-weight:600;color:#444}
+
+  .card-foot{
+    margin-top:10px;display:flex;justify-content:space-between;
+    font-size:11px;color:#999;
+  }
+  .status-online{color:#27ae60;font-weight:600}
+
+  .footnote{
+    text-align:center;margin-top:22px;font-size:12px;color:rgba(255,255,255,.85);
+    text-shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+  .footnote b{color:#f1c40f}
+
+  @media(max-width:1100px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:600px){.grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(3,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Navbar -->
+  <div class="navbar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#555" stroke-width="2"/><path d="M12 7v5l3 2" stroke="#555" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Watcher</span>
+    </div>
+    <div class="nav-actions">
+      <span>🔍 搜索</span>
+      <span>📋 导出</span>
+      <span>⚙️</span>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="summary">
+    <div class="item"><div class="label">当前时间</div><div class="value">18:18:34</div></div>
+    <div class="item"><div class="label">当前在线</div><div class="value">22<small>/ 22</small></div></div>
+    <div class="item"><div class="label">点亮地区</div><div class="value">7</div></div>
+    <div class="item"><div class="label">流量概况</div><div class="value">11.9 TB <small>↓ 848.26 GB</small></div></div>
+    <div class="item"><div class="label">网络速率</div><div class="value"><span class="up">↑ 65.62 KB/s</span> <span class="down">↓ 71.76 KB/s</span></div></div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active">所有</div>
+    <div class="tab">主用</div>
+    <div class="tab">玩具</div>
+    <div class="tab">闲置</div>
+  </div>
+
+  <!-- Cards -->
+  <div class="grid">
+
+    <!-- Card 1 -->
+    <div class="card">
+      <div class="card-head"><div class="name"><span style="background:linear-gradient(90deg,#3b82f6,#ef4444);width:18px;height:13px;border-radius:2px;display:inline-block"></span>HostDzie-LAX-Special</div><span class="star">★</span></div>
+      <div class="price"><span class="now">$28.10/月</span><span>余 335 天</span><span class="badge">主用</span></div>
+      <div class="specs"><span><span class="dot"></span>4 Cores</span><span><span class="dot"></span>5.8 GB</span><span><span class="dot"></span>97.87 GB</span></div>
+      <div class="metric"><div class="row"><span class="k">CPU</span><span class="v">2%</span></div><div class="bar"><i class="green" style="width:2%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">内存</span><span class="v">52%</span></div><div class="bar"><i class="yellow" style="width:52%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">SWAP</span><span class="v">16%</span></div><div class="bar"><i class="green" style="width:16%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">硬盘</span><span class="v">29%</span></div><div class="bar"><i class="green" style="width:29%"></i></div></div>
+      <div class="net-info">
+        <div class="line"><span>网络:</span><span>↑ 24.28 KB/s ↓ 25.76 KB/s</span></div>
+        <div class="line"><span>流量:</span><span>1.43.75 GB / 44.26 GB</span></div>
+        <div class="line"><span>负载:</span><span><b>0.01 | 0.07 | 0.08</b></span></div>
+      </div>
+      <div class="card-foot"><span>到期: 2026/7/15</span><span class="status-online">在线: 31天16小时</span></div>
+    </div>
+
+    <!-- Card 2 -->
+    <div class="card">
+      <div class="card-head"><div class="name"><span style="background:#e67e22;width:18px;height:13px;border-radius:2px;display:inline-block"></span>YxVM-HK-Volume</div><span class="star">★</span></div>
+      <div class="price"><span class="now">$3.00/月</span><span>余 29 天</span><span class="badge" style="background:#3498db">主用</span></div>
+      <div class="specs"><span><span class="dot"></span>1 Cores</span><span><span class="dot"></span>721.26 MB</span><span><span class="dot"></span>19.64 GB</span></div>
+      <div class="metric"><div class="row"><span class="k">CPU</span><span class="v">2%</span></div><div class="bar"><i class="green" style="width:2%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">内存</span><span class="v">35%</span></div><div class="bar"><i class="green" style="width:35%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">SWAP</span><span class="v">OFF</span></div><div class="bar"><i class="green" style="width:0%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">硬盘</span><span class="v">21%</span></div><div class="bar"><i class="green" style="width:21%"></i></div></div>
+      <div class="net-info">
+        <div class="line"><span>网络:</span><span>↑ 773 B/s ↓ 1.33 KB/s</span></div>
+        <div class="line"><span>流量:</span><span>1.62.86 GB / 62.74 GB</span></div>
+        <div class="line"><span>负载:</span><span><b>0.08 | 0.02 | 0.00</b></span></div>
+      </div>
+      <div class="card-foot"><span>到期: 2025/9/14</span><span class="status-online">在线: 21天11小时</span></div>
+    </div>
+
+    <!-- Card 3 -->
+    <div class="card">
+      <div class="card-head"><div class="name"><span style="background:#c0392b;width:18px;height:13px;border-radius:2px;display:inline-block"></span>CTyun-s3.large-2-GZ</div><span class="star">★</span></div>
+      <div class="price"><span class="now">¥35.00/月</span><span>余 73 天</span><span class="badge" style="background:#2ecc71">长租</span></div>
+      <div class="specs"><span><span class="dot"></span>2 Cores</span><span><span class="dot"></span>2.58 GB</span><span><span class="dot"></span>39.98 GB</span></div>
+      <div class="metric"><div class="row"><span class="k">CPU</span><span class="v">1%</span></div><div class="bar"><i class="green" style="width:1%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">内存</span><span class="v">17%</span></div><div class="bar"><i class="green" style="width:17%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">SWAP</span><span class="v">OFF</span></div><div class="bar"><i class="green" style="width:0%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">硬盘</span><span class="v">35%</span></div><div class="bar"><i class="green" style="width:35%"></i></div></div>
+      <div class="net-info">
+        <div class="line"><span>网络:</span><span>↑ 1.21 KB/s ↓ 1.58 KB/s</span></div>
+        <div class="line"><span>流量:</span><span>1.38.44 GB / 96.13 GB</span></div>
+        <div class="line"><span>负载:</span><span><b>0.08 | 0.12 | 0.03</b></span></div>
+      </div>
+      <div class="card-foot"><span>到期: 2025/7/10/28</span><span class="status-online">在线: 252天5小时</span></div>
+    </div>
+
+    <!-- Card 4 -->
+    <div class="card">
+      <div class="card-head"><div class="name"><span style="background:linear-gradient(90deg,#e74c3c,#f1c40f);width:18px;height:13px;border-radius:2px;display:inline-block"></span>Alice-HK.Pre.Free.A2</div><span class="star">★</span></div>
+      <div class="price"><span class="now" style="color:#27ae60">免费</span><span class="badge" style="background:#3498db">长租</span></div>
+      <div class="specs"><span><span class="dot"></span>1 Cores</span><span><span class="dot"></span>422.59 MB</span><span><span class="dot"></span>8.93 GB</span></div>
+      <div class="metric"><div class="row"><span class="k">CPU</span><span class="v">5%</span></div><div class="bar"><i class="green" style="width:5%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">内存</span><span class="v">56%</span></div><div class="bar"><i class="yellow" style="width:56%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">SWAP</span><span class="v">OFF</span></div><div class="bar"><i class="green" style="width:0%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">硬盘</span><span class="v">48%</span></div><div class="bar"><i class="green" style="width:48%"></i></div></div>
+      <div class="net-info">
+        <div class="line"><span>网络:</span><span>↑ 6.64 KB/s ↓ 9.22 KB/s</span></div>
+        <div class="line"><span>流量:</span><span>1.60.84 GB / 71.28 GB</span></div>
+        <div class="line"><span>负载:</span><span><b>0.02 | 0.03 | 0.00</b></span></div>
+      </div>
+      <div class="card-foot"><span>到期: 长期</span><span class="status-online">在线: 40天15小时</span></div>
+    </div>
+
+    <!-- Card 5 -->
+    <div class="card">
+      <div class="card-head"><div class="name"><span style="background:#e74c3c;width:18px;height:13px;border-radius:2px;display:inline-block"></span>CNFaster-HKL-Special</div><span class="star">★</span></div>
+      <div class="price"><span class="now">$HKD95.00/月</span><span>余 231 天</span></div>
+      <div class="specs"><span><span class="dot"></span>1 Cores</span><span><span class="dot"></span>457.45 MB</span><span><span class="dot"></span>19.94 GB</span></div>
+      <div class="metric"><div class="row"><span class="k">CPU</span><span class="v">0%</span></div><div class="bar"><i class="green" style="width:0%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">内存</span><span class="v">24%</span></div><div class="bar"><i class="green" style="width:24%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">硬盘</span><span class="v">32%</span></div><div class="bar"><i class="green" style="width:32%"></i></div></div>
+    </div>
+
+    <!-- Card 6 -->
+    <div class="card">
+      <div class="card-head"><div class="name"><span style="background:linear-gradient(90deg,#fff,#bc002d);width:18px;height:13px;border-radius:2px;display:inline-block"></span>Yunyou-JP-Mini</div><span class="star">★</span></div>
+      <div class="price"><span class="now">¥10.75/月</span><span>余 252 天</span></div>
+      <div class="specs"><span><span class="dot"></span>1 Cores</span><span><span class="dot"></span>457.42 MB</span><span><span class="dot"></span>9.94 GB</span></div>
+      <div class="metric"><div class="row"><span class="k">CPU</span><span class="v">0%</span></div><div class="bar"><i class="green" style="width:0%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">内存</span><span class="v">19%</span></div><div class="bar"><i class="green" style="width:19%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">硬盘</span><span class="v">28%</span></div><div class="bar"><i class="green" style="width:28%"></i></div></div>
+    </div>
+
+    <!-- Card 7 -->
+    <div class="card">
+      <div class="card-head"><div class="name"><span style="background:linear-gradient(90deg,#0055a4,#fff,#ef4135);width:18px;height:13px;border-radius:2px;display:inline-block"></span>Scaleyway-STARDDUST1</div><span class="star">★</span></div>
+      <div class="price"><span class="now">¥6.21/月</span><span>余 7 天</span></div>
+      <div class="specs"><span><span class="dot"></span>1 Cores</span><span><span class="dot"></span>967.96 MB</span><span><span class="dot"></span>2.71 GB</span></div>
+      <div class="metric"><div class="row"><span class="k">CPU</span><span class="v">5%</span></div><div class="bar"><i class="green" style="width:5%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">内存</span><span class="v">47%</span></div><div class="bar"><i class="green" style="width:47%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">硬盘</span><span class="v">41%</span></div><div class="bar"><i class="green" style="width:41%"></i></div></div>
+    </div>
+
+    <!-- Card 8 -->
+    <div class="card">
+      <div class="card-head"><div class="name"><span style="background:#0072c6;width:18px;height:13px;border-radius:2px;display:inline-block"></span>Azure-B2ats.v2</div><span class="star">★</span></div>
+      <div class="price"><span class="now" style="color:#e74c3c">预购</span><span>余 134 天</span></div>
+      <div class="specs"><span><span class="dot"></span>2 Cores</span><span><span class="dot"></span>907.67 MB</span><span><span class="dot"></span>52.69 GB</span></div>
+      <div class="metric"><div class="row"><span class="k">CPU</span><span class="v">0%</span></div><div class="bar"><i class="green" style="width:0%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">内存</span><span class="v">38%</span></div><div class="bar"><i class="green" style="width:38%"></i></div></div>
+      <div class="metric"><div class="row"><span class="k">硬盘</span><span class="v">22%</span></div><div class="bar"><i class="green" style="width:22%"></i></div></div>
+    </div>
+
+  </div>
+
+  <div class="footnote">Powered by <b>Komar Monitor</b> ｜ Theme by <b>PurCarte</b></div>
+</div>
+</body>
+</html>
