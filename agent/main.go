@@ -38,13 +38,19 @@ var dangerousKeywords = []string{
 }
 
 type StatData struct {
-	CPU     float64 `json:"cpu"`
-	Mem     float64 `json:"mem"`
-	Disk    float64 `json:"disk"`
-	Load1   float64 `json:"load1"`
-	Uptime  uint64  `json:"uptime"`
-	NetSent float64 `json:"net_sent"`
-	NetRecv float64 `json:"net_recv"`
+	CPU       float64 `json:"cpu"`
+	Mem       float64 `json:"mem"`
+	Disk      float64 `json:"disk"`
+	SwapPct   float64 `json:"swap_pct"`
+	Load1     float64 `json:"load_1"`
+	Load5     float64 `json:"load_5"`
+	Load15    float64 `json:"load_15"`
+	Uptime    uint64  `json:"uptime"`
+	CPUCount  int     `json:"cpu_count"`
+	MemTotal  uint64  `json:"mem_total"`
+	DiskTotal uint64  `json:"disk_total"`
+	NetSent   float64 `json:"net_sent"`
+	NetRecv   float64 `json:"net_recv"`
 }
 
 func main() {
@@ -192,18 +198,38 @@ func collectStats(netSampler *netSampler) StatData {
 	if diskInfo != nil {
 		diskVal = diskInfo.UsedPercent
 	}
-	loadVal := 0.0
+	load1 := 0.0
+	load5 := 0.0
+	load15 := 0.0
 	if loadInfo != nil {
-		loadVal = loadInfo.Load1
+		load1 = loadInfo.Load1
+		load5 = loadInfo.Load5
+		load15 = loadInfo.Load15
+	}
+	swapVal := 0.0
+	if memInfo != nil && memInfo.SwapTotal > 0 {
+		swapVal = float64(memInfo.SwapTotal-memInfo.SwapFree) / float64(memInfo.SwapTotal) * 100
 	}
 	uptimeVal := uint64(0)
 	if hostInfo != nil {
 		uptimeVal = hostInfo.Uptime
 	}
+	cpuCount, _ := cpu.Counts(true)
+	memTotal := uint64(0)
+	if memInfo != nil {
+		memTotal = memInfo.Total
+	}
+	diskTotal := uint64(0)
+	if diskInfo != nil {
+		diskTotal = diskInfo.Total
+	}
 
 	return StatData{
 		CPU: cpuVal, Mem: memVal, Disk: diskVal,
-		Load1: loadVal, Uptime: uptimeVal,
+		SwapPct: swapVal,
+		Load1: load1, Load5: load5, Load15: load15,
+		Uptime: uptimeVal,
+		CPUCount: cpuCount, MemTotal: memTotal, DiskTotal: diskTotal,
 		NetSent: netSent, NetRecv: netRecv,
 	}
 }
