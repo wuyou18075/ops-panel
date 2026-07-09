@@ -61,22 +61,30 @@ func connectAndServe() error {
 	if secret == "" {
 		return fmt.Errorf("未设置 AGENT_SECRET 环境变量，拒绝连接")
 	}
-	u := url.URL{
-		Scheme:   masterScheme(),
-		Host:     masterURL(),
-		Path:     "/ws/agent",
-		RawQuery: "id=" + url.QueryEscape(agentID) + "&token=" + url.QueryEscape(secret),
+
+	// 从 MASTER_URL 构建 WebSocket 地址
+	// MASTER_URL = http://IP:PORT/PATH → ws://IP:PORT/PATH/ws/agent?id=...
+	masterAddr := os.Getenv("MASTER_URL")
+	if masterAddr == "" {
+		masterAddr = defaultMasterURL
 	}
-	fmt.Printf("[Agent] 正在连接 Master: %s\n", u.String())
+	wsAddr := strings.Replace(masterAddr, "http://", "ws://", 1)
+	wsAddr = strings.Replace(wsAddr, "https://", "wss://", 1)
+	if !strings.HasPrefix(wsAddr, "ws") {
+		wsAddr = "ws://" + wsAddr
+	}
+	wsAddr += "/ws/agent?id=" + url.QueryEscape(agentID) + "&token=" + url.QueryEscape(secret)
+
+	fmt.Printf("[Agent] 正在连接 Master: %s\n", wsAddr)
 
 	dialer := websocket.DefaultDialer
-	if masterScheme() == "wss" {
+	if strings.HasPrefix(wsAddr, "wss") {
 		dialer = &websocket.Dialer{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 	}
 
-	conn, _, err := dialer.Dial(u.String(), nil)
+	conn, _, err := dialer.Dial(wsAddr, nil)
 	if err != nil {
 		return err
 	}
@@ -140,20 +148,6 @@ func agentID() string {
 	return hostname
 }
 
-func masterURL() string {
-	if value := os.Getenv("MASTER_URL"); value != "" {
-		return value
-	}
-	return defaultMasterURL
-}
-
-func masterScheme() string {
-	if strings.HasPrefix(masterURL(), "wss") || os.Getenv("MASTER_WSS") == "1" {
-		return "wss"
-	}
-	return "ws"
-}
-
 func parseInterval(s string) (time.Duration, error) {
 	n, err := time.ParseDuration(s + "s")
 	if err != nil {
@@ -208,13 +202,9 @@ func collectStats(netSampler *netSampler) StatData {
 	}
 
 	return StatData{
-		CPU:     cpuVal,
-		Mem:     memVal,
-		Disk:    diskVal,
-		Load1:   loadVal,
-		Uptime:  uptimeVal,
-		NetSent: netSent,
-		NetRecv: netRecv,
+		CPU: cpuVal, Mem: memVal, Disk: diskVal,
+		Load1: loadVal, Uptime: uptimeVal,
+		NetSent: netSent, NetRecv: netRecv,
 	}
 }
 
