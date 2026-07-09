@@ -76,6 +76,12 @@ func main() {
 		masterPort = "8080"
 	}
 	masterPath = os.Getenv("MASTER_PATH")
+	// 归一化：前导 /（路径必须以 / 开头）
+	if masterPath != "" && !strings.HasPrefix(masterPath, "/") {
+		masterPath = "/" + masterPath
+	}
+	// 去除尾部 /（统一处理，避免 registerRoutes 重复拼接）
+	masterPath = strings.TrimSuffix(masterPath, "/")
 	operatorUser = os.Getenv("OPERATOR_USERNAME")
 	if operatorUser == "" {
 		operatorUser = "admin"
@@ -123,7 +129,7 @@ func main() {
 		fmt.Println("  双因素: 已启用 (Google Authenticator)")
 	}
 	ip := publicIPv4()
-	fmt.Printf("  访问:   http://%s:%s%s\n", ip, masterPort, masterPath)
+	fmt.Printf("  访问:   http://%s:%s%s/\n", ip, masterPort, masterPath)
 	fmt.Println("========================================")
 
 	if err := http.ListenAndServe(":"+masterPort, nil); err != nil {
@@ -439,7 +445,6 @@ func initTGBot(token string) {
 		bot.Start()
 	}()
 }
-
 func tgAdminAllowed(chatID int64) bool {
 	raw := os.Getenv("TG_ADMIN_IDS")
 	if raw == "" {
