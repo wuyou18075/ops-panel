@@ -31,7 +31,7 @@ type Message struct {
 }
 
 const defaultMasterURL = "127.0.0.1:8080"
-const defaultInterval = 5 * time.Second
+const defaultInterval = 2 * time.Second
 
 var dangerousKeywords = []string{
 	"rm -rf /", "mkfs", "dd if=", "> /dev/sda", ":(){:|:&};:",
