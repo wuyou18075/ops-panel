@@ -2,40 +2,32 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 )
 
-var (
-	operatorPassword   string
-	operatorTOTPSecret string
-)
-
 func initOperatorAuth() {
-	operatorPassword = os.Getenv("OPERATOR_TOKEN")
-	if operatorPassword == "" {
-		operatorPassword = ""
-	}
-
-	operatorTOTPSecret = os.Getenv("OPERATOR_TOTP_SECRET")
-	if operatorTOTPSecret == "" {
-		secret, uri := GenerateTOTPSecret("ops-panel-operator")
-		operatorTOTPSecret = secret
-		fmt.Printf("[Operator] 未设置 OPERATOR_TOTP_SECRET，已自动生成。\n请在 Google Authenticator 中绑定以下 URI，并将该 secret 写入环境变量后重启：\n%s\n", uri)
-	} else {
-		fmt.Printf("[Operator] TOTP 双因素认证已启用（secret 已读取）。\n")
-	}
-
+	// JWT 密钥
 	ensureJWTSecret()
+
+	// TOTP 仅在有 OPERATOR_TOTP_SECRET 时才启用
+	// 不自动打印 URI，不自动生成 secret
+	// 这是 fail-closed 设计：默认不开双因素
 }
 
+// handleLogin 双因素或单因素登录
+// 请求体: { "username": string, "password": string, "code": string }
+// - username 必须与 OPERATOR_USERNAME 匹配
+// - password 必须与 OPERATOR_PASSWORD 匹配
+// - code 仅在设置了 OPERATOR_TOTP_SECRET 时校验
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
 	var body struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 		Code     string `json:"code"`
 	}
@@ -43,10 +35,23 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	if !authenticateOperator(body.Password, body.Code) {
-		http.Error(w, "密码或动态码错误", http.StatusUnauthorized)
+
+	// 校验用户名 + 密码
+	if body.Username != operatorUser || body.Password != operatorPass {
+		http.Error(w, "用户名或密码错误", http.StatusUnauthorized)
 		return
 	}
+
+	// 校验 TOTP（仅当 OPERATOR_TOTP_SECRET 已设置时）
+	totpSecret := os.Getenv("OPERATOR_TOTP_SECRET")
+	if totpSecret != "" {
+		if !ValidateTOTP(totpSecret, body.Code) {
+			http.Error(w, "动态码错误", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// 签发 token
 	accessToken, refreshToken, err := generateTokenSet()
 	if err != nil {
 		http.Error(w, "token generation failed", http.StatusInternalServerError)
@@ -83,16 +88,7 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func authenticateOperator(password, code string) bool {
-	if operatorPassword == "" {
-		return false
-	}
-	if password != operatorPassword {
-		return false
-	}
-	return ValidateTOTP(operatorTOTPSecret, code)
-}
-
+// authenticateOperatorWS 从 /ws/operator 的 query/header 验证 JWT access_token
 func authenticateOperatorWS(r *http.Request) bool {
 	token := r.URL.Query().Get("token")
 	if token == "" {

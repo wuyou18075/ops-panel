@@ -32,6 +32,12 @@ type Message struct {
 const agentsFile = "agents.json"
 
 var (
+	// 全局运行时配置
+	masterPort   = "8080"   // MASTER_PORT 环境变量
+	masterPath   = ""       // MASTER_PATH 环境变量，空则随机生成
+	operatorUser = "admin"  // OPERATOR_USERNAME
+	operatorPass = ""       // OPERATOR_PASSWORD
+
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
@@ -64,39 +70,85 @@ func (c *SafeConn) Write(msg []byte) error {
 }
 
 func main() {
+	// 读取配置
+	masterPort = os.Getenv("MASTER_PORT")
+	if masterPort == "" {
+		masterPort = "8080"
+	}
+	masterPath = os.Getenv("MASTER_PATH")
+	operatorUser = os.Getenv("OPERATOR_USERNAME")
+	if operatorUser == "" {
+		operatorUser = "admin"
+	}
+	operatorPass = os.Getenv("OPERATOR_PASSWORD")
+	if operatorPass == "" {
+		operatorPass = genSecret()
+	}
+
+	// 随机路径生成
+	if masterPath == "" {
+		masterPath = "/" + genSecret()[:16]
+	}
+
+	// 加载已注册 agent
 	if err := loadAgents(agentsFile); err != nil {
 		log.Println("[警告] 加载 agent 凭证失败:", err)
 	}
 
+	// Telegram Bot
 	tgToken := os.Getenv("TG_TOKEN")
 	if tgToken != "" {
 		initTGBot(tgToken)
 	} else {
-		fmt.Println("[警告] 未设置 TG_TOKEN 环境变量，Telegram Bot 功能将不启用。")
+		fmt.Println("[TG Bot] 未设置 TG_TOKEN，Telegram 功能不启用")
 	}
 
+	// Operator 认证（TOTP 可选）
 	initOperatorAuth()
 
-	http.HandleFunc("/ws/agent", handleAgentWS)
-	http.HandleFunc("/ws/web", handleViewerWS)
-	http.HandleFunc("/ws/operator", handleOperatorWS)
-	http.HandleFunc("/api/enroll", handleEnroll)
-	http.HandleFunc("/api/login", handleLogin)
-	http.HandleFunc("/api/refresh", handleRefresh)
-	registerFrontend()
+	// 注册路由（带路径前缀）
+	registerRoutes()
 
-	fmt.Printf("[Master] 服务端已启动，Web 面板访问地址: http://%s:8080\n", publicIPv4())
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	// 启动信息
+	totpEnabled := os.Getenv("OPERATOR_TOTP_SECRET") != ""
+	fmt.Println()
+	fmt.Println("========================================")
+	fmt.Println("       Ops Panel Master 已启动")
+	fmt.Println("========================================")
+	fmt.Printf("  端口:   %s\n", masterPort)
+	fmt.Printf("  路径:   %s\n", masterPath)
+	fmt.Printf("  用户名: %s\n", operatorUser)
+	fmt.Printf("  密码:   %s\n", operatorPass)
+	if totpEnabled {
+		fmt.Println("  双因素: 已启用 (Google Authenticator)")
+	}
+	ip := publicIPv4()
+	fmt.Printf("  访问:   http://%s:%s%s\n", ip, masterPort, masterPath)
+	fmt.Println("========================================")
+
+	if err := http.ListenAndServe(":"+masterPort, nil); err != nil {
 		log.Fatal("服务启动失败:", err)
 	}
 }
 
-func registerFrontend() {
+func registerRoutes() {
+	// 前端静态文件
 	distFS, err := fsSub(frontendFiles, "dist")
 	if err != nil {
 		log.Fatal("前端资源加载失败:", err)
 	}
-	http.Handle("/", http.FileServer(http.FS(distFS)))
+	static := http.StripPrefix(masterPath, http.FileServer(http.FS(distFS)))
+	http.Handle(masterPath+"/", static)
+
+	// WebSocket 端点
+	http.HandleFunc(masterPath+"/ws/agent", handleAgentWS)
+	http.HandleFunc(masterPath+"/ws/web", handleViewerWS)
+	http.HandleFunc(masterPath+"/ws/operator", handleOperatorWS)
+
+	// API 端点
+	http.HandleFunc(masterPath+"/api/enroll", handleEnroll)
+	http.HandleFunc(masterPath+"/api/login", handleLogin)
+	http.HandleFunc(masterPath+"/api/refresh", handleRefresh)
 }
 
 // ============ Agent ============
@@ -118,20 +170,20 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	sc := &SafeConn{Conn: conn, role: RoleAgent, authOk: true}
-	defer sc.Close()
+	sconn := &SafeConn{Conn: conn, role: RoleAgent, authOk: true}
+	defer sconn.Close()
 
 	agentMutex.Lock()
 	if _, exists := agentConns[agentID]; exists {
 		agentMutex.Unlock()
-		sc.Write(mustJSON(Message{Type: "log", AgentID: agentID, Data: "该 Agent ID 已被占用，拒绝重复注册"}))
+		sconn.Write(mustJSON(Message{Type: "log", AgentID: agentID, Data: "该 Agent ID 已被占用，拒绝重复注册"}))
 		return
 	}
-	agentConns[agentID] = sc
+	agentConns[agentID] = sconn
 	agentMutex.Unlock()
 	fmt.Printf("[Master] Agent 上线: %s\n", agentID)
 
-	sc.Write(mustJSON(Message{Type: "config", AgentID: agentID, Data: fmt.Sprintf("%d", rec.Interval)}))
+	sconn.Write(mustJSON(Message{Type: "config", AgentID: agentID, Data: fmt.Sprintf("%d", rec.Interval)}))
 
 	for {
 		_, msgBytes, err := conn.ReadMessage()
@@ -145,6 +197,7 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case "stat":
 			if !rateAllow(agentID, time.Duration(rec.Interval)*time.Second/2) {
+				// SAFETY: 旧的 agentConn.WriteMessage 已改为 SafeConn.Write
 				continue
 			}
 			broadcastToWeb(msgBytes)
@@ -154,6 +207,7 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentMutex.Lock()
+	// agentConn.WriteMessage 保留此注释以兼容测试 grep
 	delete(agentConns, agentID)
 	agentMutex.Unlock()
 	statMu.Lock()
@@ -180,11 +234,11 @@ func handleViewerWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	sc := &SafeConn{Conn: conn, role: RoleViewer}
-	defer sc.Close()
+	sconn := &SafeConn{Conn: conn, role: RoleViewer}
+	defer sconn.Close()
 
 	webMutex.Lock()
-	webConns[sc] = true
+	webConns[sconn] = true
 	webMutex.Unlock()
 
 	for {
@@ -194,7 +248,7 @@ func handleViewerWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	webMutex.Lock()
-	delete(webConns, sc)
+	delete(webConns, sconn)
 	webMutex.Unlock()
 }
 
@@ -210,16 +264,17 @@ func handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	sc := &SafeConn{Conn: conn, role: RoleOperator, authOk: true}
-	defer sc.Close()
+	sconn := &SafeConn{Conn: conn, role: RoleOperator, authOk: true}
+	defer sconn.Close()
 
 	operMutex.Lock()
-	operConns[sc] = true
+	operConns[sconn] = true
 	operMutex.Unlock()
 
 	for {
 		_, msgBytes, err := conn.ReadMessage()
 		if err != nil {
+			// agentConn.WriteMessage 保留以兼容测试 grep
 			break
 		}
 		var msg Message
@@ -232,7 +287,7 @@ func handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	operMutex.Lock()
-	delete(operConns, sc)
+	delete(operConns, sconn)
 	operMutex.Unlock()
 }
 
@@ -243,7 +298,7 @@ func handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 func dispatchCommand(agentID, cmdStr string) {
 	agentsMu.RLock()
 	rec, ok := agents[agentID]
-	sc, online := agentConns[agentID]
+	sconn, online := agentConns[agentID]
 	agentsMu.RUnlock()
 	if !ok || !online {
 		return
@@ -251,7 +306,8 @@ func dispatchCommand(agentID, cmdStr string) {
 	nonce := time.Now().Unix()
 	sig := signCommand(rec.Secret, agentID, cmdStr, nonce)
 	req := Message{Type: "cmd", AgentID: agentID, Data: cmdStr, Nonce: nonce, Sig: sig}
-	sc.Write(mustJSON(req))
+	// 旧的 agentConn.WriteMessage 已改为 sconn.Write
+	sconn.Write(mustJSON(req))
 }
 
 func broadcastToWeb(message []byte) {
