@@ -54,7 +54,7 @@
                 <span class="text-xs text-slate-400">{{ viewMode==='table'?'表格':'卡片' }}</span>
               </div>
               <NCard v-if="viewMode==='table'" :bordered="false" class="border border-line bg-panel">
-                <NDataTable :columns="cols" :data="mergedData" :bordered="false" :pagination="{pageSize:8}" size="small" :row-props="()=>{style:'background:var(--bg-row)'}" />
+                <NDataTable :columns="cols" :data="mergedData" :bordered="false" :pagination="{pageSize:8}" size="small" :row-class="()=>'striped-row'" />
               </NCard>
               <div v-if="viewMode==='cards'" class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <div v-for="n in mergedData" :key="n.id" class="rounded-lg border border-line bg-panel p-4 cursor-pointer hover:border-accent/50 transition-all" @click="term(n.id)">
