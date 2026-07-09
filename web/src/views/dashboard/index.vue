@@ -375,7 +375,7 @@ async function doLogin() {
   if (!loginUsername.value || !loginPassword.value) { message.error("请输入用户名和密码"); return; }
   loginLoading.value = true;
   try {
-    const r = await fetch(api("/api/login"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: loginPassword.value, code: loginTOTP.value }) });
+    const r = await fetch(api("/api/login"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: loginUsername.value, password: loginPassword.value, code: loginTOTP.value }) });
     if (!r.ok) { message.error((await r.text()) || "登录失败"); return; }
     const d = await r.json();
     operatorToken.value = d.access_token; refreshToken.value = d.refresh_token;
