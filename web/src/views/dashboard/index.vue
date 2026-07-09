@@ -22,16 +22,26 @@
           <div>
             <div class="flex items-center gap-3">
               <span class="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.9)]" />
-              <h1 class="text-xl font-semibold text-white">哪吒集群监控控制台</h1>
+              <h1 class="text-xl font-semibold text-white">集群监控运维面板</h1>
             </div>
-            <p class="mt-1 text-sm text-slate-400">实时掌控 VPS 节点在线状态、资源占用、流量与远程命令执行结果</p>
+            <p class="mt-1 text-sm text-slate-400">
+              实时掌控 VPS 节点在线状态、资源占用、流量与远程命令执行
+            </p>
           </div>
           <NSpace>
             <NTag :type="wsConnected ? 'success' : 'error'" round>
               {{ wsConnected ? "主控已连接" : "主控重连中" }}
             </NTag>
-            <NTag type="info" round>在线 {{ onlineCount }}</NTag>
-            <NButton size="small" tertiary @click="connectWebSocket(true)">刷新连接</NButton>
+            <NTag type="info" round>在线 {{ onlineDisplay }}</NTag>
+            <NButton size="small" tertiary @click="connectViewerWS(true)">
+              刷新连接
+            </NButton>
+            <NButton v-if="operatorToken" size="small" type="success" ghost @click="showLogin = true">
+              运维登录中
+            </NButton>
+            <NButton v-else size="small" type="primary" ghost @click="showLogin = true">
+              登录
+            </NButton>
           </NSpace>
         </div>
       </NLayoutHeader>
@@ -39,7 +49,7 @@
       <NLayoutContent class="p-4 lg:p-6">
         <NGrid :cols="4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
           <NGi span="4 s:2 l:1">
-            <MetricCard label="在线节点" :value="String(onlineCount)" hint="Agent 实时连接" tone="green" />
+            <MetricCard label="在线节点" :value="String(onlineCount)" hint="过去 10 秒内有上报的 Agent" tone="green" />
           </NGi>
           <NGi span="4 s:2 l:1">
             <MetricCard label="平均 CPU" :value="`${avgCpu.toFixed(1)}%`" hint="所有在线节点" tone="blue" />
@@ -82,25 +92,42 @@
       </NLayoutContent>
     </NLayout>
 
+    <!-- 命令终端 Drawer -->
     <NDrawer v-model:show="showDrawer" :width="680" placement="right" resizable>
       <NDrawerContent :title="`节点控制台 - ${activeNodeId}`">
-        <div class="mb-4 grid gap-3">
-          <NInputGroup>
-            <NInput v-model:value="shellCommand" placeholder="输入 Shell 命令，例如 df -h" @keyup.enter="sendShellCommand" />
-            <NButton type="primary" :disabled="!canSendCommand" @click="sendShellCommand">分发执行</NButton>
-          </NInputGroup>
-          <NSpace>
-            <NButton v-for="cmd in quickCommands" :key="cmd" size="small" tertiary @click="shellCommand = cmd">
-              {{ cmd }}
-            </NButton>
-          </NSpace>
-        </div>
-        <div class="h-[calc(100vh-220px)] overflow-y-auto rounded bg-black p-4 font-mono text-xs leading-6 text-emerald-300">
-          <div v-if="terminalLogs.length === 0" class="text-slate-500">等待分发命令输入...</div>
-          <div v-for="(log, index) in terminalLogs" :key="index">{{ log }}</div>
-        </div>
+        <template v-if="operatorToken">
+          <div class="mb-4 grid gap-3">
+            <NInputGroup>
+              <NInput v-model:value="shellCommand" placeholder="输入 Shell 命令，例如 df -h" @keyup.enter="sendShellCommand" />
+              <NButton type="primary" :disabled="!canSendCommand" @click="sendShellCommand">分发执行</NButton>
+            </NInputGroup>
+            <NSpace>
+              <NButton v-for="cmd in quickCommands" :key="cmd" size="small" tertiary @click="shellCommand = cmd">
+                {{ cmd }}
+              </NButton>
+            </NSpace>
+          </div>
+          <div class="h-[calc(100vh-220px)] overflow-y-auto rounded bg-black p-4 font-mono text-xs leading-6 text-emerald-300">
+            <div v-if="terminalLogs.length === 0" class="text-slate-500">等待分发命令输入...</div>
+            <div v-for="(log, index) in terminalLogs" :key="index">{{ log }}</div>
+          </div>
+        </template>
+        <template v-else>
+          <NEmpty description="请先点击右上角「登录」完成双因素认证" />
+        </template>
       </NDrawerContent>
     </NDrawer>
+
+    <!-- 登录弹窗（双因素：密码 + Google Authenticator TOTP） -->
+    <NModal v-model:show="showLogin" title="运维指挥台登录" :mask-closable="false" preset="card" style="width: 400px">
+      <NSpace vertical>
+        <NInput v-model:value="loginPassword" type="password" placeholder="Operator Password" />
+        <NInput v-model:value="loginTOTP" placeholder="Google Authenticator 6位动态码" />
+        <NButton type="primary" block :loading="loginLoading" @click="doLogin">
+          验证并登录
+        </NButton>
+      </NSpace>
+    </NModal>
   </NLayout>
 </template>
 
@@ -121,12 +148,15 @@ import {
   NLayoutContent,
   NLayoutHeader,
   NLayoutSider,
+  NModal,
   NProgress,
   NSpace,
   NTag,
   useMessage,
   type DataTableColumns,
 } from "naive-ui";
+
+// ============ 类型定义 ============
 
 type AgentStats = {
   cpu: number;
@@ -140,7 +170,7 @@ type AgentStats = {
 };
 
 type WireMessage = {
-  type: "stat" | "cmd" | "log";
+  type: "stat" | "cmd" | "log" | "config";
   agent_id: string;
   data: string;
 };
@@ -150,6 +180,8 @@ type EventLog = {
   text: string;
   time: string;
 };
+
+// ============ 子组件 ============
 
 const MetricCard = defineComponent({
   props: {
@@ -165,7 +197,6 @@ const MetricCard = defineComponent({
       violet: "from-violet-500/20 to-violet-500/5 text-violet-300",
       red: "from-rose-500/20 to-rose-500/5 text-rose-300",
     };
-
     return () =>
       h(
         "div",
@@ -179,6 +210,10 @@ const MetricCard = defineComponent({
   },
 });
 
+// ============ 状态 ============
+
+const ONLINE_TIMEOUT_MS = 10_000; // 10 秒无上报视为离线
+
 const nodes = ref<Record<string, AgentStats>>({});
 const wsConnected = ref(false);
 const showDrawer = ref(false);
@@ -189,24 +224,48 @@ const eventLogs = ref<EventLog[]>([]);
 const message = useMessage();
 const quickCommands = ["df -h", "free -m", "uptime", "docker ps", "systemctl --failed"];
 
-let ws: WebSocket | null = null;
+// 登录状态
+const showLogin = ref(false);
+const loginPassword = ref("");
+const loginTOTP = ref("");
+const loginLoading = ref(false);
+const operatorToken = ref("");
+const refreshToken = ref("");
+
+let viewerWS: WebSocket | null = null;
+let operatorWS: WebSocket | null = null;
 let reconnectTimer: number | undefined;
 
-const onlineCount = computed(() => Object.keys(nodes.value).length);
+// ============ 计算属性 ============
+
+/** 过去 ONLINE_TIMEOUT 内有上报的节点才算在线 */
+const nowMs = ref(Date.now());
+let clockTimer: number | undefined;
+
+const onlineCount = computed(() =>
+  Object.values(nodes.value).filter(
+    (n) => nowMs.value - n.updatedAt < ONLINE_TIMEOUT_MS,
+  ).length,
+);
+const onlineDisplay = computed(() => `${onlineCount.value} / ${Object.keys(nodes.value).length}`);
+
 const tableData = computed(() =>
   Object.entries(nodes.value).map(([id, stat]) => ({
     id,
     ...stat,
   })),
 );
-const avgCpu = computed(() => average(tableData.value.map((node) => node.cpu)));
-const avgMem = computed(() => average(tableData.value.map((node) => node.mem)));
+
+const avgCpu = computed(() => average(tableData.value.map((n) => n.cpu)));
+const avgMem = computed(() => average(tableData.value.map((n) => n.mem)));
 const alertCount = computed(
-  () => tableData.value.filter((node) => node.cpu > 80 || node.mem > 80 || (node.disk ?? 0) > 80).length,
+  () => tableData.value.filter((n) => n.cpu > 80 || n.mem > 80 || (n.disk ?? 0) > 80).length,
 );
 const canSendCommand = computed(
-  () => wsConnected.value && activeNodeId.value !== "" && shellCommand.value.trim() !== "",
+  () => !!operatorToken.value && activeNodeId.value !== "" && shellCommand.value.trim() !== "",
 );
+
+// ============ 表格列 ============
 
 const columns: DataTableColumns<Record<string, number | string | undefined>> = [
   {
@@ -219,8 +278,14 @@ const columns: DataTableColumns<Record<string, number | string | undefined>> = [
   {
     title: "状态",
     key: "status",
-    render() {
-      return h(NTag, { type: "success", size: "small", round: true }, { default: () => "在线" });
+    render(_row, index) {
+      const node = tableData.value[index];
+      const alive = node ? nowMs.value - (node.updatedAt as number) < ONLINE_TIMEOUT_MS : false;
+      return h(NTag, {
+        type: alive ? "success" : "error",
+        size: "small",
+        round: true,
+      }, { default: () => alive ? "在线" : "离线" });
     },
   },
   progressColumn("CPU", "cpu", "success"),
@@ -277,54 +342,61 @@ function progressColumn(title: string, key: string, status: "success" | "info" |
   };
 }
 
+// ============ 工具函数 ============
+
 function average(values: number[]) {
-  if (values.length === 0) {
-    return 0;
-  }
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+  if (values.length === 0) return 0;
+  return values.reduce((sum, v) => sum + v, 0) / values.length;
 }
 
 function formatBytes(value: number) {
-  if (value < 1024) {
-    return `${value.toFixed(0)} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
+  if (value < 1024) return `${value.toFixed(0)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function wsUrl() {
+// ============ Viewer WebSocket（公开，只收数据）============
+
+function viewerUrl() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   return `${protocol}://${window.location.host}/ws/web`;
 }
 
-function connectWebSocket(force = false) {
-  if (force && ws) {
-    ws.close();
+function connectViewerWS(force = false) {
+  if (force && viewerWS) {
+    viewerWS.close();
   }
   window.clearTimeout(reconnectTimer);
-  ws = new WebSocket(wsUrl());
+  viewerWS = new WebSocket(viewerUrl());
 
-  ws.onopen = () => {
+  viewerWS.onopen = () => {
     wsConnected.value = true;
-    message.success("已连接主控实时监控流");
   };
 
-  ws.onmessage = (event) => {
-    const rawMsg = JSON.parse(event.data) as WireMessage;
+  viewerWS.onmessage = (event) => {
+    let rawMsg: WireMessage;
+    try {
+      rawMsg = JSON.parse(event.data) as WireMessage;
+    } catch {
+      return;
+    }
+
     if (rawMsg.type === "stat") {
-      const payload = JSON.parse(rawMsg.data) as Omit<AgentStats, "updatedAt">;
-      nodes.value[rawMsg.agent_id] = {
-        cpu: Number(payload.cpu ?? 0),
-        mem: Number(payload.mem ?? 0),
-        disk: Number(payload.disk ?? 0),
-        load1: Number(payload.load1 ?? 0),
-        uptime: Number(payload.uptime ?? 0),
-        net_recv: Number(payload.net_recv ?? 0),
-        net_sent: Number(payload.net_sent ?? 0),
-        updatedAt: Date.now(),
-      };
+      try {
+        const payload = JSON.parse(rawMsg.data) as Omit<AgentStats, "updatedAt">;
+        nodes.value[rawMsg.agent_id] = {
+          cpu: Number(payload.cpu ?? 0),
+          mem: Number(payload.mem ?? 0),
+          disk: Number(payload.disk ?? 0),
+          load1: Number(payload.load1 ?? 0),
+          uptime: Number(payload.uptime ?? 0),
+          net_recv: Number(payload.net_recv ?? 0),
+          net_sent: Number(payload.net_sent ?? 0),
+          updatedAt: Date.now(),
+        };
+      } catch {
+        // 忽略异常的 stat 数据
+      }
       pushEvent(rawMsg.agent_id, "状态数据已刷新");
       return;
     }
@@ -337,11 +409,117 @@ function connectWebSocket(force = false) {
     }
   };
 
-  ws.onclose = () => {
+  viewerWS.onclose = () => {
     wsConnected.value = false;
-    reconnectTimer = window.setTimeout(() => connectWebSocket(), 3000);
+    reconnectTimer = window.setTimeout(() => connectViewerWS(), 3000);
   };
 }
+
+// ============ Operator WebSocket（需 JWT 登录，用于下发命令）============
+
+function connectOperatorWS(token: string) {
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const url = `${protocol}://${window.location.host}/ws/operator?token=${encodeURIComponent(token)}`;
+
+  operatorWS?.close();
+  operatorWS = new WebSocket(url);
+
+  operatorWS.onopen = () => {
+    message.success("指挥台连接已建立");
+  };
+
+  operatorWS.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data) as WireMessage;
+      if (msg.type === "log") {
+        pushEvent(msg.agent_id, msg.data);
+        if (showDrawer.value && msg.agent_id === activeNodeId.value) {
+          terminalLogs.value.push(msg.data);
+        }
+      }
+    } catch {
+      // 忽略异常消息
+    }
+  };
+
+  operatorWS.onclose = () => {
+    message.error("指挥台连接已断开");
+    operatorToken.value = "";
+    operatorWS = null;
+  };
+}
+
+// ============ 登录逻辑 ============
+
+async function doLogin() {
+  if (!loginPassword.value || !loginTOTP.value) {
+    message.error("请输入密码和动态码");
+    return;
+  }
+  loginLoading.value = true;
+  try {
+    const resp = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        password: loginPassword.value,
+        code: loginTOTP.value,
+      }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      message.error(text || "登录失败");
+      return;
+    }
+    const data = await resp.json();
+    operatorToken.value = data.access_token;
+    refreshToken.value = data.refresh_token;
+
+    // 连接 Operator WS
+    connectOperatorWS(data.access_token);
+
+    message.success("双因素认证通过，指挥台已就绪");
+    showLogin.value = false;
+    loginPassword.value = "";
+    loginTOTP.value = "";
+
+    // 15 分钟后自动刷新 token
+    scheduleTokenRefresh();
+  } catch (err) {
+    message.error("网络请求失败");
+  } finally {
+    loginLoading.value = false;
+  }
+}
+
+function scheduleTokenRefresh() {
+  // 提前 2 分钟刷新（access_token 15min 有效期）
+  setTimeout(async () => {
+    if (!refreshToken.value) return;
+    try {
+      const resp = await fetch("/api/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken.value }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        operatorToken.value = data.access_token;
+        refreshToken.value = data.refresh_token;
+        connectOperatorWS(data.access_token);
+        scheduleTokenRefresh();
+      } else {
+        message.error("Token 刷新失败，请重新登录");
+        operatorToken.value = "";
+        refreshToken.value = "";
+      }
+    } catch {
+      // 重试
+    }
+  }, 13 * 60 * 1000); // 13 分钟
+}
+
+// ============ 命令下发 ============
 
 function openTerminal(agentId: string) {
   activeNodeId.value = agentId;
@@ -350,20 +528,22 @@ function openTerminal(agentId: string) {
 }
 
 function sendShellCommand() {
-  if (!canSendCommand.value || !ws || ws.readyState !== WebSocket.OPEN) {
-    message.error("主控连接已断开，无法下发指令");
+  if (!canSendCommand.value || !operatorWS || operatorWS.readyState !== WebSocket.OPEN) {
+    message.error("指挥台连接未就绪或未登录");
     return;
   }
+  const cmd = shellCommand.value.trim();
+  terminalLogs.value.push(`$ ${cmd}`);
 
-  const packet: WireMessage = {
+  operatorWS.send(JSON.stringify({
     type: "cmd",
     agent_id: activeNodeId.value,
-    data: shellCommand.value.trim(),
-  };
-
-  terminalLogs.value.push(`$ ${packet.data}`);
-  ws.send(JSON.stringify(packet));
+    data: cmd,
+  }));
+  // viewerWS 也会收到日志输出回显
 }
+
+// ============ 事件与生命周期 ============
 
 function pushEvent(agentId: string, text: string) {
   eventLogs.value.unshift({
@@ -375,11 +555,15 @@ function pushEvent(agentId: string, text: string) {
 }
 
 onMounted(() => {
-  connectWebSocket();
+  connectViewerWS();
+  // 每秒刷新时钟（用于离线检测）
+  clockTimer = window.setInterval(() => { nowMs.value = Date.now(); }, 1000);
 });
 
 onUnmounted(() => {
   window.clearTimeout(reconnectTimer);
-  ws?.close();
+  window.clearInterval(clockTimer);
+  viewerWS?.close();
+  operatorWS?.close();
 });
 </script>

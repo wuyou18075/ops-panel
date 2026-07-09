@@ -2,11 +2,14 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,9 +27,18 @@ type Message struct {
 	Type    string `json:"type"`
 	AgentID string `json:"agent_id"`
 	Data    string `json:"data"`
+	Nonce   int64  `json:"nonce,omitempty"`
+	Sig     string `json:"sig,omitempty"`
 }
 
 const defaultMasterURL = "127.0.0.1:8080"
+const defaultInterval = 5 * time.Second
+
+// 危险命令黑名单：即使 Master 已签名，本地仍拒绝执行破坏性指令。
+// 纵深防御：防止 Master 被入侵后下发毁灭性命令。
+var dangerousKeywords = []string{
+	"rm -rf /", "mkfs", "dd if=", "> /dev/sda", ":(){:|:&};:",
+}
 
 type StatData struct {
 	CPU     float64 `json:"cpu"`
@@ -48,10 +60,27 @@ func main() {
 
 func connectAndServe() error {
 	agentID := agentID()
-	u := url.URL{Scheme: "ws", Host: masterURL(), Path: "/ws/agent", RawQuery: "id=" + agentID}
+	secret := os.Getenv("AGENT_SECRET")
+	if secret == "" {
+		return fmt.Errorf("未设置 AGENT_SECRET 环境变量，拒绝连接")
+	}
+	u := url.URL{
+		Scheme:   masterScheme(),
+		Host:     masterURL(),
+		Path:     "/ws/agent",
+		RawQuery: "id=" + url.QueryEscape(agentID) + "&token=" + url.QueryEscape(secret),
+	}
 	fmt.Printf("[Agent] 正在连接 Master: %s\n", u.String())
 
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	dialer := websocket.DefaultDialer
+	if masterScheme() == "wss" {
+		// 允许自签证书（部署方应确保实际用可信证书）
+		dialer = &websocket.Dialer{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
+
+	conn, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
 		return err
 	}
@@ -61,21 +90,20 @@ func connectAndServe() error {
 
 	var writeMutex sync.Mutex
 	netSampler := newNetSampler()
+	interval := defaultInterval
 
-	// 1. 开启协程：每 2 秒上报一次 CPU 和内存状态
+	// 1. 上报协程：按 Master 下发的频率上报
 	go func() {
 		for {
 			statData := collectStats(netSampler)
 			statBytes, _ := json.Marshal(statData)
-
 			msg := Message{Type: "stat", AgentID: agentID, Data: string(statBytes)}
 			writeJSON(conn, &writeMutex, msg)
-
-			time.Sleep(2 * time.Second)
+			time.Sleep(interval)
 		}
 	}()
 
-	// 2. 主循环：监听 Master 下发的命令
+	// 2. 主循环：监听 Master 下发
 	for {
 		var msg Message
 		err := conn.ReadJSON(&msg)
@@ -83,8 +111,26 @@ func connectAndServe() error {
 			return err
 		}
 
-		if msg.Type == "cmd" {
-			fmt.Printf("[Agent] 收到指令: %s\n", msg.Data)
+		switch msg.Type {
+		case "config":
+			if secs, err := parseInterval(msg.Data); err == nil {
+				interval = secs
+				fmt.Printf("[Agent] 上报频率已更新为 %s\n", interval)
+			}
+		case "cmd":
+			// 先验签再执行：无 secret 算不出合法 sig，伪造命令直接丢弃
+			if !verifyCommand(secret, msg.AgentID, msg.Data, msg.Nonce, msg.Sig) {
+				fmt.Println("[Agent] 命令签名校验失败，已丢弃")
+				continue
+			}
+			if isDangerous(msg.Data) {
+				fmt.Println("[Agent] 命中危险命令黑名单，已拒绝执行:", msg.Data)
+				writeJSON(conn, &writeMutex, Message{
+					Type: "log", AgentID: agentID, Data: "拒绝执行：命中危险命令黑名单",
+				})
+				continue
+			}
+			fmt.Printf("[Agent] 收到已签名的指令: %s\n", msg.Data)
 			go executeCommand(conn, &writeMutex, agentID, msg.Data)
 		}
 	}
@@ -108,6 +154,37 @@ func masterURL() string {
 	return defaultMasterURL
 }
 
+func masterScheme() string {
+	if strings.HasPrefix(masterURL(), "wss") || os.Getenv("MASTER_WSS") == "1" {
+		return "wss"
+	}
+	return "ws"
+}
+
+func parseInterval(s string) (time.Duration, error) {
+	n, err := time.ParseDuration(s + "s")
+	if err != nil {
+		return 0, err
+	}
+	if n < 1*time.Second {
+		n = 1 * time.Second
+	}
+	if n > 60*time.Second {
+		n = 60 * time.Second
+	}
+	return n, nil
+}
+
+func isDangerous(cmd string) bool {
+	lower := strings.ToLower(cmd)
+	for _, k := range dangerousKeywords {
+		if strings.Contains(lower, k) {
+			return true
+		}
+	}
+	return false
+}
+
 func collectStats(netSampler *netSampler) StatData {
 	cpuPercent, _ := cpu.Percent(0, false)
 	memInfo, _ := mem.VirtualMemory()
@@ -120,22 +197,18 @@ func collectStats(netSampler *netSampler) StatData {
 	if len(cpuPercent) > 0 {
 		cpuVal = cpuPercent[0]
 	}
-
 	memVal := 0.0
 	if memInfo != nil {
 		memVal = memInfo.UsedPercent
 	}
-
 	diskVal := 0.0
 	if diskInfo != nil {
 		diskVal = diskInfo.UsedPercent
 	}
-
 	loadVal := 0.0
 	if loadInfo != nil {
 		loadVal = loadInfo.Load1
 	}
-
 	uptimeVal := uint64(0)
 	if hostInfo != nil {
 		uptimeVal = hostInfo.Uptime
@@ -168,17 +241,15 @@ func (s *netSampler) rate() (float64, float64) {
 	if err != nil || len(counters) == 0 {
 		return 0, 0
 	}
-
 	currentSent := counters[0].BytesSent
 	currentRecv := counters[0].BytesRecv
 	elapsed := now.Sub(s.lastTime).Seconds()
-	if s.lastTime.IsZero() || elapsed <= 0 || s.lastSent == 0 && s.lastRecv == 0 {
+	if s.lastTime.IsZero() || elapsed <= 0 || (s.lastSent == 0 && s.lastRecv == 0) {
 		s.lastSent = currentSent
 		s.lastRecv = currentRecv
 		s.lastTime = now
 		return 0, 0
 	}
-
 	sentRate := float64(currentSent-s.lastSent) / elapsed
 	recvRate := float64(currentRecv-s.lastRecv) / elapsed
 	s.lastSent = currentSent
@@ -187,28 +258,38 @@ func (s *netSampler) rate() (float64, float64) {
 	return sentRate, recvRate
 }
 
-// 异步执行命令并将输出流推回 Master
+// executeCommand 本地执行命令：30s 超时（防挂起）、输出截断（防内存爆）。
 func executeCommand(conn *websocket.Conn, writeMutex *sync.Mutex, agentID string, command string) {
-	cmd := exec.Command("sh", "-c", command)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Stderr = cmd.Stdout
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return
 	}
-	cmd.Stderr = cmd.Stdout
-
 	if err := cmd.Start(); err != nil {
 		return
 	}
 
 	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
+	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024) // 单行最大 64KB
+	lines := 0
+	const maxLines = 2000
+	for scanner.Scan() && lines < maxLines {
 		text := scanner.Text()
-		resp := Message{Type: "log", AgentID: agentID, Data: text}
-		writeJSON(conn, writeMutex, resp)
+		writeJSON(conn, writeMutex, Message{Type: "log", AgentID: agentID, Data: text})
+		lines++
+	}
+	if lines >= maxLines {
+		writeJSON(conn, writeMutex, Message{Type: "log", AgentID: agentID, Data: "... 输出过长已截断 ..."})
 	}
 
-	cmd.Wait()
+	if err := cmd.Wait(); err != nil {
+		writeJSON(conn, writeMutex, Message{Type: "log", AgentID: agentID, Data: "执行错误: " + err.Error()})
+	}
 	writeJSON(conn, writeMutex, Message{Type: "log", AgentID: agentID, Data: "--- 执行结束 ---"})
 }
 
