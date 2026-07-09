@@ -22,7 +22,6 @@ import (
 	netio "github.com/shirou/gopsutil/v3/net"
 )
 
-// 需与 Master 保持一致的数据结构
 type Message struct {
 	Type    string `json:"type"`
 	AgentID string `json:"agent_id"`
@@ -34,8 +33,6 @@ type Message struct {
 const defaultMasterURL = "127.0.0.1:8080"
 const defaultInterval = 5 * time.Second
 
-// 危险命令黑名单：即使 Master 已签名，本地仍拒绝执行破坏性指令。
-// 纵深防御：防止 Master 被入侵后下发毁灭性命令。
 var dangerousKeywords = []string{
 	"rm -rf /", "mkfs", "dd if=", "> /dev/sda", ":(){:|:&};:",
 }
@@ -51,11 +48,11 @@ type StatData struct {
 }
 
 func main() {
-	for {
-		err := connectAndServe()
-		fmt.Println("[Agent] 连接断开，3秒后尝试重连...", err)
-		time.Sleep(3 * time.Second)
+	err := connectAndServe()
+	if err != nil {
+		fmt.Println("[Agent] 连接失败:", err)
 	}
+	fmt.Println("[Agent] 进程退出")
 }
 
 func connectAndServe() error {
@@ -74,7 +71,6 @@ func connectAndServe() error {
 
 	dialer := websocket.DefaultDialer
 	if masterScheme() == "wss" {
-		// 允许自签证书（部署方应确保实际用可信证书）
 		dialer = &websocket.Dialer{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
@@ -92,7 +88,6 @@ func connectAndServe() error {
 	netSampler := newNetSampler()
 	interval := defaultInterval
 
-	// 1. 上报协程：按 Master 下发的频率上报
 	go func() {
 		for {
 			statData := collectStats(netSampler)
@@ -103,7 +98,6 @@ func connectAndServe() error {
 		}
 	}()
 
-	// 2. 主循环：监听 Master 下发
 	for {
 		var msg Message
 		err := conn.ReadJSON(&msg)
@@ -118,7 +112,6 @@ func connectAndServe() error {
 				fmt.Printf("[Agent] 上报频率已更新为 %s\n", interval)
 			}
 		case "cmd":
-			// 先验签再执行：无 secret 算不出合法 sig，伪造命令直接丢弃
 			if !verifyCommand(secret, msg.AgentID, msg.Data, msg.Nonce, msg.Sig) {
 				fmt.Println("[Agent] 命令签名校验失败，已丢弃")
 				continue
@@ -258,7 +251,6 @@ func (s *netSampler) rate() (float64, float64) {
 	return sentRate, recvRate
 }
 
-// executeCommand 本地执行命令：30s 超时（防挂起）、输出截断（防内存爆）。
 func executeCommand(conn *websocket.Conn, writeMutex *sync.Mutex, agentID string, command string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -275,7 +267,7 @@ func executeCommand(conn *websocket.Conn, writeMutex *sync.Mutex, agentID string
 	}
 
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024) // 单行最大 64KB
+	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
 	lines := 0
 	const maxLines = 2000
 	for scanner.Scan() && lines < maxLines {

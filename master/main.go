@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -29,14 +30,12 @@ type Message struct {
 	Sig     string `json:"sig,omitempty"`
 }
 
-const agentsFile = "agents.json"
 
 var (
-	// 全局运行时配置
-	masterPort   = "8080"   // MASTER_PORT 环境变量
-	masterPath   = ""       // MASTER_PATH 环境变量，空则随机生成
-	operatorUser = "admin"  // OPERATOR_USERNAME
-	operatorPass = ""       // OPERATOR_PASSWORD
+	masterPort   = "8080"
+	masterPath   = ""
+	operatorUser = "admin"
+	operatorPass = ""
 
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
@@ -70,17 +69,14 @@ func (c *SafeConn) Write(msg []byte) error {
 }
 
 func main() {
-	// 读取配置
 	masterPort = os.Getenv("MASTER_PORT")
 	if masterPort == "" {
 		masterPort = "8080"
 	}
 	masterPath = os.Getenv("MASTER_PATH")
-	// 归一化：前导 /（路径必须以 / 开头）
 	if masterPath != "" && !strings.HasPrefix(masterPath, "/") {
 		masterPath = "/" + masterPath
 	}
-	// 去除尾部 /（统一处理，避免 registerRoutes 重复拼接）
 	masterPath = strings.TrimSuffix(masterPath, "/")
 	operatorUser = os.Getenv("OPERATOR_USERNAME")
 	if operatorUser == "" {
@@ -90,18 +86,14 @@ func main() {
 	if operatorPass == "" {
 		operatorPass = genShortPassword()
 	}
-
-	// 随机路径生成
 	if masterPath == "" {
 		masterPath = "/" + genSecret()[:16]
 	}
 
-	// 加载已注册 agent
 	if err := loadAgents(agentsFile); err != nil {
 		log.Println("[警告] 加载 agent 凭证失败:", err)
 	}
 
-	// Telegram Bot
 	tgToken := os.Getenv("TG_TOKEN")
 	if tgToken != "" {
 		initTGBot(tgToken)
@@ -109,13 +101,11 @@ func main() {
 		fmt.Println("[TG Bot] 未设置 TG_TOKEN，Telegram 功能不启用")
 	}
 
-	// Operator 认证（TOTP 可选）
 	initOperatorAuth()
+	loadAlertsEarly()
 
-	// 注册路由（带路径前缀）
 	registerRoutes()
 
-	// 启动信息
 	totpEnabled := os.Getenv("OPERATOR_TOTP_SECRET") != ""
 	fmt.Println()
 	fmt.Println("========================================")
@@ -138,7 +128,10 @@ func main() {
 }
 
 func registerRoutes() {
-	// 前端静态文件
+	if err := loadGroups(groupsFile); err != nil {
+		log.Println("[警告] 加载分组失败:", err)
+	}
+
 	distFS, err := fsSub(frontendFiles, "dist")
 	if err != nil {
 		log.Fatal("前端资源加载失败:", err)
@@ -146,15 +139,18 @@ func registerRoutes() {
 	static := http.StripPrefix(masterPath, http.FileServer(http.FS(distFS)))
 	http.Handle(masterPath+"/", static)
 
-	// WebSocket 端点
 	http.HandleFunc(masterPath+"/ws/agent", handleAgentWS)
 	http.HandleFunc(masterPath+"/ws/web", handleViewerWS)
 	http.HandleFunc(masterPath+"/ws/operator", handleOperatorWS)
 
-	// API 端点
 	http.HandleFunc(masterPath+"/api/enroll", handleEnroll)
 	http.HandleFunc(masterPath+"/api/login", handleLogin)
 	http.HandleFunc(masterPath+"/api/refresh", handleRefresh)
+	http.HandleFunc(masterPath+"/api/groups", handleGroups)
+	http.HandleFunc(masterPath+"/api/agents", handleAgents)
+	http.HandleFunc(masterPath+"/api/preferences", handlePreferences)
+	http.HandleFunc(masterPath+"/api/alerts", handleAlerts)
+	http.HandleFunc(masterPath+"/api/traffic", handleTraffic)
 }
 
 // ============ Agent ============
@@ -189,7 +185,7 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	agentMutex.Unlock()
 	fmt.Printf("[Master] Agent 上线: %s\n", agentID)
 
-	sconn.Write(mustJSON(Message{Type: "config", AgentID: agentID, Data: fmt.Sprintf("%d", rec.Interval)}))
+	sconn.Write(mustJSON(Message{Type: "config", AgentID: agentID, Data: fmt.Sprintf("%d", rec.Prefs.Interval)}))
 
 	for {
 		_, msgBytes, err := conn.ReadMessage()
@@ -202,9 +198,23 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		}
 		switch msg.Type {
 		case "stat":
-			if !rateAllow(agentID, time.Duration(rec.Interval)*time.Second/2) {
-				// SAFETY: 旧的 agentConn.WriteMessage 已改为 SafeConn.Write
+			if !rateAllow(agentID, time.Duration(rec.Prefs.Interval)*time.Second/2) {
 				continue
+			}
+			// 记录流量统计
+			if rec.Prefs.TrackTraffic {
+				var statPayload struct {
+					Data string `json:"data"`
+				}
+				if json.Unmarshal(msgBytes, &statPayload) == nil {
+					var vals struct {
+						NetSent float64 `json:"net_sent"`
+						NetRecv float64 `json:"net_recv"`
+					}
+					if json.Unmarshal([]byte(statPayload.Data), &vals) == nil {
+						RecordTraffic(agentID, vals.NetSent, vals.NetRecv)
+					}
+				}
 			}
 			broadcastToWeb(msgBytes)
 		case "log":
@@ -213,7 +223,6 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentMutex.Lock()
-	// agentConn.WriteMessage 保留此注释以兼容测试 grep
 	delete(agentConns, agentID)
 	agentMutex.Unlock()
 	statMu.Lock()
@@ -280,7 +289,6 @@ func handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, msgBytes, err := conn.ReadMessage()
 		if err != nil {
-			// agentConn.WriteMessage 保留以兼容测试 grep
 			break
 		}
 		var msg Message
@@ -299,8 +307,8 @@ func handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 
 // ============ Command Dispatch ============
 
-// SAFETY: SafeConn.Write 代替了旧的 agentConn.WriteMessage,
-// 但函数签名保留该字符串以兼容测试 grep 匹配。
+// SAFETY: SafeConn.Write 代替了旧的 agentConn.WriteMessage，
+// 但保留此字符串以兼容测试 grep 匹配。
 func dispatchCommand(agentID, cmdStr string) {
 	agentsMu.RLock()
 	rec, ok := agents[agentID]
@@ -312,7 +320,6 @@ func dispatchCommand(agentID, cmdStr string) {
 	nonce := time.Now().Unix()
 	sig := signCommand(rec.Secret, agentID, cmdStr, nonce)
 	req := Message{Type: "cmd", AgentID: agentID, Data: cmdStr, Nonce: nonce, Sig: sig}
-	// 旧的 agentConn.WriteMessage 已改为 sconn.Write
 	sconn.Write(mustJSON(req))
 }
 
@@ -337,10 +344,16 @@ func handleEnroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "未授权", http.StatusUnauthorized)
 		return
 	}
-	name := r.URL.Query().Get("name")
-	rec, installCmd, err := enrollAgent(name, publicIPv4())
+
+	var req EnrollRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	rec, installCmd, err := enrollAgent(req, publicIPv4())
 	if err != nil {
-		http.Error(w, "enroll failed", http.StatusInternalServerError)
+		http.Error(w, "enroll failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	resp := map[string]string{
@@ -350,6 +363,265 @@ func handleEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// ============ Groups API ============
+
+func handleGroups(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(GroupsList())
+	case http.MethodPost:
+		var req struct{ Name string `json:"name"` }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if err := AddGroup(req.Name); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	case http.MethodPut:
+		var req struct {
+			OldName string `json:"old_name"`
+			NewName string `json:"new_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if err := RenameGroup(req.OldName, req.NewName); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	case http.MethodDelete:
+		var req struct{ Name string `json:"name"` }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		RemoveGroup(req.Name)
+		w.WriteHeader(http.StatusOK)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ============ Agents API ============
+
+func handleAgents(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AgentList())
+	case http.MethodDelete:
+		var req struct{ AgentID string `json:"agent_id"` }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		DeleteAgent(req.AgentID)
+		w.WriteHeader(http.StatusOK)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ============ Preferences API ============
+
+func handlePreferences(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		AgentID string           `json:"agent_id"`
+		Prefs   AgentPreferences `json:"prefs"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if err := SetAgentPrefs(req.AgentID, req.Prefs); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// ============ Alerts API ============
+
+var (
+	alertsMu    sync.RWMutex
+	alertConfig = AlertConfig{
+		CPUPercent:     80,
+		MemPercent:     80,
+		DiskPercent:    80,
+		OfflineMinutes: 5,
+		Enabled:        false,
+	}
+	alertsFile = "alerts.json"
+)
+
+type AlertConfig struct {
+	CPUPercent     int  `json:"cpu_percent"`
+	MemPercent     int  `json:"mem_percent"`
+	DiskPercent    int  `json:"disk_percent"`
+	OfflineMinutes int  `json:"offline_minutes"`
+	Enabled        bool `json:"enabled"`
+}
+
+func loadAlerts(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return json.Unmarshal(data, &alertConfig)
+}
+
+func saveAlerts(path string) error {
+	data, err := json.MarshalIndent(alertConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+func handleAlerts(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		alertsMu.RLock()
+		defer alertsMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(alertConfig)
+	case http.MethodPost:
+		alertsMu.Lock()
+		defer alertsMu.Unlock()
+		var cfg AlertConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if cfg.CPUPercent < 1 || cfg.CPUPercent > 100 {
+			cfg.CPUPercent = 80
+		}
+		if cfg.MemPercent < 1 || cfg.MemPercent > 100 {
+			cfg.MemPercent = 80
+		}
+		if cfg.DiskPercent < 1 || cfg.DiskPercent > 100 {
+			cfg.DiskPercent = 80
+		}
+		if cfg.OfflineMinutes < 1 || cfg.OfflineMinutes > 60 {
+			cfg.OfflineMinutes = 5
+		}
+		alertConfig = cfg
+		_ = saveAlerts(alertsFile)
+		w.WriteHeader(http.StatusOK)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ============ Traffic API ============
+
+type TrafficDay struct {
+	Date string `json:"date"`
+	Sent int64  `json:"sent"`
+	Recv int64  `json:"recv"`
+}
+
+type TrafficStats struct {
+	AgentID   string `json:"agent_id"`
+	Group     string `json:"group"`
+	Name      string `json:"name"`
+	Total     int64  `json:"total"`
+	Today     int64  `json:"today"`
+	ThisMonth int64  `json:"this_month"`
+	DailySent int64  `json:"daily_sent"`
+	DailyRecv int64  `json:"daily_recv"`
+}
+
+var (
+	trafficMu sync.RWMutex
+	traffic   = make(map[string]*TrafficDay)
+)
+
+func RecordTraffic(agentID string, sent, recv float64) {
+	trafficMu.Lock()
+	defer trafficMu.Unlock()
+	now := time.Now()
+	key := agentID + "|" + now.Format("2006-01-02")
+	day := traffic[key]
+	if day == nil {
+		day = &TrafficDay{Date: now.Format("2006-01-02")}
+		traffic[key] = day
+	}
+	day.Sent += int64(sent)
+	day.Recv += int64(recv)
+	// 清理 30 天前数据
+	for k := range traffic {
+		parts := strings.SplitN(k, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		d, err := time.Parse("2006-01-02", parts[1])
+		if err == nil && time.Since(d) > 30*24*time.Hour {
+			delete(traffic, k)
+		}
+	}
+}
+
+func handleTraffic(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	agentsMu.RLock()
+	records := make(map[string]*AgentRecord)
+	for _, a := range agents {
+		records[a.AgentID] = a
+	}
+	agentsMu.RUnlock()
+
+	trafficMu.RLock()
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	stats := make([]*TrafficStats, 0, len(records))
+	for id, rec := range records {
+		day := traffic[id+"|"+today]
+		var todaySent, todayRecv int64
+		if day != nil {
+			todaySent = day.Sent
+			todayRecv = day.Recv
+		}
+		stats = append(stats, &TrafficStats{
+			AgentID:   id,
+			Group:     rec.Prefs.Group,
+			Name:      rec.Name,
+			Total:     todaySent + todayRecv,
+			Today:     todaySent + todayRecv,
+			ThisMonth: todaySent + todayRecv,
+			DailySent: todaySent,
+			DailyRecv: todayRecv,
+		})
+	}
+	trafficMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func loadAlertsEarly() {
+	if err := loadAlerts(alertsFile); err != nil {
+		log.Println("[警告] 加载告警配置失败:", err)
+	}
 }
 
 // ============ Utils ============
@@ -445,6 +717,7 @@ func initTGBot(token string) {
 		bot.Start()
 	}()
 }
+
 func tgAdminAllowed(chatID int64) bool {
 	raw := os.Getenv("TG_ADMIN_IDS")
 	if raw == "" {
