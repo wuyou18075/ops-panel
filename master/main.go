@@ -19,7 +19,7 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
-//go:embed dist/* agent-install.sh
+//go:embed dist/*
 var frontendFiles embed.FS
 
 type Message struct {
