@@ -27,7 +27,6 @@ install_env() {
     ARCH=$(uname -m)
     [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ] && GO_FILE="go${GO_VERSION}.linux-arm64.tar.gz" || GO_FILE="go${GO_VERSION}.linux-amd64.tar.gz"
     wget "https://golang.google.cn/dl/$GO_FILE"; rm -rf /usr/local/go; tar -C /usr/local -xzf "$GO_FILE"; rm "$GO_FILE"
-    [ "$APP_DIR" != "/" ] && rm -rf "$APP_DIR" 2>/dev/null || true
     if ! grep -q "/usr/local/go/bin" ~/.profile 2>/dev/null; then
       echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.profile
     fi
@@ -38,9 +37,7 @@ install_env() {
   export PATH="$PATH:/usr/local/go/bin"
   ensure_latest_node; echo "Node.js 版本: $(node -v)"; echo "npm 版本: $(npm -v)"
   echo "正在从 Git 拉取项目文件..."
-  if [ -d "$APP_DIR" ]; then
-    echo "目录 $APP_DIR 已存在，正在清理旧目录..."; rm -rf "$APP_DIR"
-  fi
+  if [ -d "$APP_DIR" ]; then echo "目录 $APP_DIR 已存在，正在清理旧目录..."; rm -rf "$APP_DIR"; fi
   git clone https://github.com/wuyou18075/ops-panel.git "$APP_DIR"
   echo "开始初始化依赖并创建目录..."; cd "$APP_DIR"
   [ ! -f go.mod ] && go mod init "$MODULE_PATH"
@@ -94,6 +91,13 @@ uninstall_all() {
   echo "=== 开始卸载所有环境与代码 ==="
   [ -d "$APP_DIR" ] && { rm -rf "$APP_DIR"; echo "已清除代码目录: $APP_DIR"; }
   [ -d "/usr/local/go" ] && { rm -rf /usr/local/go; echo "已清除 Go 环境目录: /usr/local/go"; }
+  if command -v pnpm &> /dev/null; then npm uninstall -g pnpm 2>/dev/null && echo "已卸载 pnpm" || true; fi
+  PNPM_HOME="${PNPM_HOME:-$HOME/.local/share/pnpm}"
+  [ -d "$PNPM_HOME" ] && { rm -rf "$PNPM_HOME"; echo "已清除 pnpm 数据"; }
+  N_PREFIX="${N_PREFIX:-$HOME/n}"
+  [ -d "$N_PREFIX" ] && { rm -rf "$N_PREFIX"; echo "已清除 n 数据"; }
+  npm cache clean --force 2>/dev/null && echo "已清理 npm 缓存" || true
+  [ -f ~/.profile ] && sed -i '/\/usr\/local\/go\/bin/d' ~/.profile 2>/dev/null && echo "已清理 ~/.profile 中的 Go 路径"
   echo "=== 所有组件与环境已完全卸载 ==="
 }
 

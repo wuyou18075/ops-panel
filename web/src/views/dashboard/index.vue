@@ -112,7 +112,7 @@
                 <div v-for="node in filteredTableData" :key="node.id" class="mb-2 cursor-pointer rounded p-2 text-sm"
                   :class="activeNodeId === node.id ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:bg-white/5'"
                   @click="selectTerminalNode(node.id as string)">
-                  {{ node.name || node.id }}
+                  {{ node.id }}
                 </div>
                 <NEmpty v-if="filteredTableData.length === 0" description="暂无可用节点" />
               </NCard>
@@ -382,7 +382,7 @@ async function doLogin() {
     connectOperatorWS(d.access_token);
     message.success("登录成功"); showLogin.value = false;
     loginPassword.value = ""; loginTOTP.value = "";
-    setTimeout(() => { fetch(api("/api/refresh"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: refreshToken.value }) }).then(r => r.ok && r.json().then(d => { operatorToken.value = d.access_token; connectOperatorWS(d.access_token); })); }, 13 * 60 * 1000);
+    setTimeout(async () => { try { const r = await fetch(api("/api/refresh"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: refreshToken.value }) }); if (r.ok) { const d = await r.json(); operatorToken.value = d.access_token; connectOperatorWS(d.access_token); } else { message.error("Token 刷新失败，请重新登录"); operatorToken.value = ""; refreshToken.value = ""; } } catch {} }, 13 * 60 * 1000);
   } catch { message.error("网络请求失败"); } finally { loginLoading.value = false; }
 }
 
