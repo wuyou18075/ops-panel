@@ -313,7 +313,7 @@ func handleGroups(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusOK)
 	case http.MethodPut:
-		var req struct{ OldName, NewName string `json:"old_name,new_name"` }
+		var req struct{ OldName string `json:"old_name"`; NewName string `json:"new_name"` }
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid body", http.StatusBadRequest); return
 		}

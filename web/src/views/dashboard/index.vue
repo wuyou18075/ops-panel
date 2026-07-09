@@ -158,7 +158,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, ref } from "vue";
+import { computed, defineComponent, h, onMounted, onUnmounted, ref } from "vue";
 import { NButton, NCard, NCheckbox, NDataTable, NEmpty, NGi, NGrid, NInput, NInputGroup, NInputNumber, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NModal, NProgress, NSelect, NSpace, NSwitch, NTag, useMessage, type DataTableColumns, type SelectOption } from "naive-ui";
 
 type T = "midnight"|"forest"|"ocean"|"sunset"|"aurora";
@@ -169,14 +169,14 @@ const themeList = [
   { k:"sunset",  l:"落日橙", c:"#2a1a10" },
   { k:"aurora",  l:"极光紫", c:"#1a1030" },
 ];
-const themeMap: Record<T,any> = {
+const themeMap: Record<string,any> = {
   midnight: { body:"#0f1117", panel:"#171a22", line:"#2b3140", ca:"#18a058", car:"24,160,88", ct:"#e5e7eb" },
   forest:   { body:"#0d1f14", panel:"#152a1c", line:"#2a4535", ca:"#34d399", car:"52,211,153", ct:"#d1fae5" },
   ocean:    { body:"#0a1628", panel:"#0f2240", line:"#1a3a60", ca:"#38bdf8", car:"56,189,248", ct:"#e0f2fe" },
   sunset:   { body:"#1a0e08", panel:"#2a1a10", line:"#4a3020", ca:"#fb923c", car:"251,146,60", ct:"#fff7ed" },
   aurora:   { body:"#120820", panel:"#1c0e30", line:"#302050", ca:"#a78bfa", car:"167,139,250", ct:"#f5f3ff" },
 };
-const theme = ref<T>("midnight");
+const theme = ref("midnight");
 const themeStyle = ref({});
 const pages = [{k:"dashboard",l:"监控概览",s:"实时监控VPS状态"},{k:"nodes",l:"节点列表",s:"管理全部节点"},{k:"terminal",l:"命令终端",s:"远程命令执行"},{k:"alerts",l:"告警策略",s:"设置触发条件"}];
 const pageTitle = computed(() => pages.find(p=>p.k===activePage.value)?.l||"");
