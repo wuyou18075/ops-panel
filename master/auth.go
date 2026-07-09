@@ -191,3 +191,16 @@ func sanitizeAgentID(id string) string {
 		}
 	}, id)
 }
+
+// genShortPassword 生成 8 位字母数字随机密码（用于 operator 默认密码）。
+func genShortPassword() string {
+	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	for i := range b {
+		b[i] = chars[int(b[i])%len(chars)]
+	}
+	return string(b)
+}

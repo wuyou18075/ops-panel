@@ -82,7 +82,7 @@ func main() {
 	}
 	operatorPass = os.Getenv("OPERATOR_PASSWORD")
 	if operatorPass == "" {
-		operatorPass = genSecret()
+		operatorPass = genShortPassword()
 	}
 
 	// 随机路径生成

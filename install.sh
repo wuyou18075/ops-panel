@@ -42,11 +42,9 @@ ensure_latest_node() {
 install_env() {
   echo "=== 开始安装环境与拉取项目 ==="
 
-  # 安装基础依赖
   apt-get update
   apt-get install -y git wget curl tar nodejs npm
 
-  # 自动检测架构并安装对应版本的 Go (如果系统未安装 Go)
   if ! command -v go &> /dev/null; then
     echo "未检测到 Go，准备下载安装..."
     ARCH=$(uname -m)
@@ -61,7 +59,6 @@ install_env() {
     tar -C /usr/local -xzf "$GO_FILE"
     rm "$GO_FILE"
 
-    # 写入环境变量
     if ! grep -q "/usr/local/go/bin" ~/.profile; then
       echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.profile
     fi
@@ -70,14 +67,12 @@ install_env() {
     echo "检测到 Go 已安装，跳过下载。"
   fi
 
-  # 确保当前会话能用到 go 命令
   export PATH="$PATH:/usr/local/go/bin"
 
   ensure_latest_node
   echo "Node.js 版本: $(node -v)"
   echo "npm 版本: $(npm -v)"
 
-  # 拉取 Git 仓库
   echo "正在从 Git 拉取项目文件..."
   if [ -d "$APP_DIR" ]; then
     echo "目录 $APP_DIR 已存在，正在清理旧目录..."
@@ -85,7 +80,6 @@ install_env() {
   fi
   git clone https://github.com/wuyou18075/ops-panel.git "$APP_DIR"
 
-  # 执行初始化和依赖下载命令
   echo "开始初始化依赖并创建目录..."
   cd "$APP_DIR"
   if [ ! -f go.mod ]; then
@@ -124,15 +118,29 @@ start_master() {
   export PATH="$PATH:/usr/local/go/bin"
   cd "$APP_DIR"
 
-  read -r -p "请输入你的 TG 机器人 Token (留空则仅启动 Web 面板): " tg_token
+  read -r -p "请输入 TG 机器人 Token (留空则仅启动 Web 面板): " tg_token
+  read -r -p "请输入服务端口 (留空默认 8080): " master_port
+  read -r -p "请输入路径前缀 (留空随机生成, 如 /sbg): " master_path
+  read -r -p "请输入运维用户名 (留空默认 admin): " op_user
+  read -r -p "请输入运维密码 (留空随机生成 8 位): " op_pass
 
-  if [ -z "$tg_token" ]; then
-    echo "未输入 Token，正在启动 Web 纯净版..."
-    go run ./master
-  else
-    echo "Token 已录入，正在启动带 TG 交互的完整版..."
-    TG_TOKEN="$tg_token" go run ./master
+  echo "正在启动..."
+  if [ -n "$tg_token" ]; then
+    export TG_TOKEN="$tg_token"
   fi
+  if [ -n "$master_port" ]; then
+    export MASTER_PORT="$master_port"
+  fi
+  if [ -n "$master_path" ]; then
+    export MASTER_PATH="$master_path"
+  fi
+  if [ -n "$op_user" ]; then
+    export OPERATOR_USERNAME="$op_user"
+  fi
+  if [ -n "$op_pass" ]; then
+    export OPERATOR_PASSWORD="$op_pass"
+  fi
+  go run ./master
 }
 
 # ==========================================
@@ -179,13 +187,11 @@ delete_local_code() {
 uninstall_all() {
   echo "=== 开始卸载所有环境与代码 ==="
 
-  # 1. 删除代码目录
   if [ -d "$APP_DIR" ]; then
     rm -rf "$APP_DIR"
     echo "已清除代码目录: $APP_DIR"
   fi
 
-  # 2. 删除由此脚本安装的 Go 环境
   if [ -d "/usr/local/go" ]; then
     rm -rf /usr/local/go
     echo "已清除 Go 环境目录: /usr/local/go"
