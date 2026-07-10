@@ -24,7 +24,7 @@ export const alertCfg = ref<AlertConfig>({
   mem_percent: 80,
   disk_percent: 80,
   offline_minutes: 5,
-  enabled: false,
+  enabled: true,
 });
 
 export const wsConnected = ref(false);

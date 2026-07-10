@@ -104,6 +104,7 @@ func main() {
 	registerRoutes()
 	go trafficAlertLoop()
 	go persistTrafficLoop()
+	go alertLoop()
 
 	totpEnabled := os.Getenv("OPERATOR_TOTP_SECRET") != ""
 	fmt.Println()
@@ -242,6 +243,10 @@ func ingestStat(agentID string, rec *AgentRecord, data string) {
 	}
 	if rec.Prefs.TrackTraffic { RecordTraffic(agentID, s.NetSent, s.NetRecv) }
 	recordHistory(agentID, s.CPU, s.Mem, s.Disk, s.NetSent, s.NetRecv)
+	metricMu.Lock()
+	latestStat[agentID] = statSample{CPU: s.CPU, Mem: s.Mem, Disk: s.Disk}
+	lastSeen[agentID] = time.Now()
+	metricMu.Unlock()
 }
 
 // ============ Viewer ============
@@ -428,7 +433,7 @@ func handlePreferences(w http.ResponseWriter, r *http.Request) {
 
 var (
 	alertsMu    sync.RWMutex
-	alertConfig = AlertConfig{CPUPercent: 80, MemPercent: 80, DiskPercent: 80, OfflineMinutes: 5, Enabled: false}
+	alertConfig = AlertConfig{CPUPercent: 80, MemPercent: 80, DiskPercent: 80, OfflineMinutes: 5, Enabled: true}
 	alertsFile  = "alerts.json"
 )
 
