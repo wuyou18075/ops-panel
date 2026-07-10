@@ -2,26 +2,28 @@
 set -euo pipefail
 
 APP_DIR="/opt/ops-panel"
-GO_VERSION="1.21.6"
+GO_VERSION="1.25.0"
 MODULE_PATH="github.com/wuyou18075/ops-panel"
-NODE_MIN_VERSION="22.13.0"
 
-version_ge() { current="$1"; required="$2"; [ "$(printf '%s\n%s\n' "$required" "$current" | sort -V | head -n 1)" = "$required" ]; }
-
-ensure_latest_node() {
-  if ! command -v node &> /dev/null; then
-    echo "未检测到 Node.js，准备安装最新版..."
-    npm install -g n; n latest; export PATH="/usr/local/bin:$PATH"; hash -r; return
-  fi
-  current_node_version="$(node -v | sed 's/^v//')"
-  if version_ge "$current_node_version" "$NODE_MIN_VERSION"; then echo "Node.js 版本满足要求: v$current_node_version"; return; fi
-  echo "Node.js 版本过低: v$current_node_version，最低要求: v$NODE_MIN_VERSION，准备升级到最新版..."
-  npm install -g n; n latest; export PATH="/usr/local/bin:$PATH"; hash -r
+# ensure_swap 在小内存机器（<1.5G 且 swap 不足）上创建 2G swap，
+# 避免编译 modernc.org/libc（SQLite 依赖）时内存耗尽触发 OOM 杀掉 sshd。
+ensure_swap() {
+  local mem_total swap_total
+  mem_total=$(free -m | awk '/^Mem:/{print $2}')
+  swap_total=$(free -m | awk '/^Swap:/{print $2}')
+  if [ "${mem_total:-0}" -ge 1536 ]; then return; fi
+  if [ "${swap_total:-0}" -ge 1024 ]; then echo "已有 swap ${swap_total}MB，跳过创建。"; return; fi
+  if [ -f /swapfile ]; then swapon /swapfile 2>/dev/null || true; return; fi
+  echo "内存仅 ${mem_total}MB 且 swap 不足，创建 2G swap 防止编译 OOM..."
+  fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048
+  chmod 600 /swapfile; mkswap /swapfile; swapon /swapfile
+  grep -q '/swapfile' /etc/fstab 2>/dev/null || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  echo "swap 已启用。"
 }
 
 install_env() {
   echo "=== 开始安装环境与拉取项目 ==="
-  apt-get update; apt-get install -y git wget curl tar nodejs npm
+  apt-get update; apt-get install -y git wget curl tar
   if ! command -v go &> /dev/null; then
     echo "未检测到 Go，准备下载安装..."
     ARCH=$(uname -m)
@@ -35,18 +37,19 @@ install_env() {
     echo "检测到 Go 已安装，跳过下载。"
   fi
   export PATH="$PATH:/usr/local/go/bin"
-  ensure_latest_node; echo "Node.js 版本: $(node -v)"; echo "npm 版本: $(npm -v)"
   echo "正在从 Git 拉取项目文件..."
   if [ -d "$APP_DIR" ]; then echo "目录 $APP_DIR 已存在，正在清理旧目录..."; rm -rf "$APP_DIR"; fi
   git clone https://github.com/wuyou18075/ops-panel.git "$APP_DIR"
   echo "开始初始化依赖并创建目录..."; cd "$APP_DIR"
-  [ ! -f go.mod ] && go mod init "$MODULE_PATH"
-  for pkg in github.com/gorilla/websocket github.com/shirou/gopsutil/v3/cpu github.com/shirou/gopsutil/v3/disk github.com/shirou/gopsutil/v3/host github.com/shirou/gopsutil/v3/load github.com/shirou/gopsutil/v3/mem github.com/shirou/gopsutil/v3/net gopkg.in/telebot.v3; do go get "$pkg"; done
-  go mod tidy
-  echo "开始构建前端资源..."; npm install -g pnpm; echo "pnpm 版本: $(pnpm -v)"
-  cd "$APP_DIR/web"; pnpm install; pnpm build; cd "$APP_DIR"
-  mkdir -p master/static agent
-  echo "=== 环境安装与项目初始化完成！ ==="
+  mkdir -p agent
+  go mod download
+  # 小内存机器先建 swap，避免编译 modernc（SQLite）时 OOM
+  ensure_swap
+  # 前端已随仓库提交到 master/dist（go:embed 直接内嵌），服务器无需 Node/pnpm 构建。
+  # -p=1 限制并行编译，降低峰值内存，适配小内存 VPS。
+  echo "开始编译 Master（内嵌已构建前端，单并行以省内存）..."
+  GOFLAGS=-p=1 go build -o "$APP_DIR/ops-panel-master" ./master
+  echo "=== 环境安装与项目初始化完成！二进制: $APP_DIR/ops-panel-master ==="
 }
 
 start_master() {
@@ -63,7 +66,12 @@ start_master() {
   [ -n "$master_path" ] && export MASTER_PATH="$master_path"
   [ -n "$op_user" ] && export OPERATOR_USERNAME="$op_user"
   [ -n "$op_pass" ] && export OPERATOR_PASSWORD="$op_pass"
-  go run ./master
+  if [ ! -x "$APP_DIR/ops-panel-master" ]; then
+    echo "未找到已编译二进制，正在编译（小内存机器请确保已有 swap）..."
+    ensure_swap
+    GOFLAGS=-p=1 go build -o "$APP_DIR/ops-panel-master" ./master
+  fi
+  exec "$APP_DIR/ops-panel-master"
 }
 
 start_agent() {
@@ -78,7 +86,11 @@ start_agent() {
 
 pull_latest() {
   echo "=== 开始拉取最新代码 ==="
-  if [ -d "$APP_DIR" ]; then cd "$APP_DIR"; git pull; echo "=== 代码更新完成 ==="
+  if [ -d "$APP_DIR" ]; then
+    export PATH="$PATH:/usr/local/go/bin"; cd "$APP_DIR"; git pull
+    go mod download; ensure_swap
+    echo "重新编译 Master..."; GOFLAGS=-p=1 go build -o "$APP_DIR/ops-panel-master" ./master
+    echo "=== 代码更新并重新编译完成 ==="
   else echo "错误: $APP_DIR 目录不存在，请先选择选项 1 安装环境。"; fi
 }
 
