@@ -116,5 +116,13 @@ export interface AlertConfig {
   enabled: boolean;
 }
 
+export interface LoginLog {
+  ts: number;
+  ip: string;
+  location: string;
+  device: string;
+  username: string;
+}
+
 export type ThemeKey = "dark" | "green" | "gray" | "sepia" | "purple";
 export type ViewMode = "cards" | "table";

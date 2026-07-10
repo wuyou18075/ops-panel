@@ -139,6 +139,9 @@
             <NButton type="primary" :loading="savingAlert" @click="saveAlerts" style="margin-top: 10px">保存</NButton>
           </div>
         </template>
+
+        <!-- ══ 登录日志 ══ -->
+        <LoginLogsPage v-else-if="page === 'loginlogs' && !publicMode" />
       </div>
     </main>
 
@@ -210,6 +213,7 @@ import CardMode from "../../components/CardMode.vue";
 import TableMode from "../../components/TableMode.vue";
 import SummaryBar from "../../components/SummaryBar.vue";
 import MonitorsPage from "../../components/MonitorsPage.vue";
+import LoginLogsPage from "../../components/LoginLogsPage.vue";
 import NodeEditModal from "../../components/NodeEditModal.vue";
 import NodeDetailDrawer from "../../components/NodeDetailDrawer.vue";
 import { Api } from "../../api";
@@ -253,6 +257,7 @@ const navPages = computed(() => {
   if (!publicMode) {
     base.push({ k: "terminal", l: "命令终端", i: "⌘" });
     base.push({ k: "alerts", l: "告警策略", i: "!" });
+    base.push({ k: "loginlogs", l: "登录日志", i: "≡" });
   }
   return base;
 });

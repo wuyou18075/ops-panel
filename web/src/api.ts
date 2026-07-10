@@ -4,6 +4,7 @@ import type {
   AgentRecord,
   AlertConfig,
   HistPoint,
+  LoginLog,
   Monitor,
   MonitorView,
   TrafficStats,
@@ -129,5 +130,11 @@ export const Api = {
       headers: authHeaders(),
       body: JSON.stringify({ id }),
     }).then(parse);
+  },
+  loginLogs(): Promise<LoginLog[]> {
+    return fetch(api("/api/login-logs"), { headers: authHeaders() }).then(parse);
+  },
+  clearLoginLogs() {
+    return fetch(api("/api/login-logs"), { method: "DELETE", headers: authHeaders() }).then(parse);
   },
 };
