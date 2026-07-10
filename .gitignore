@@ -5,3 +5,7 @@ master/ops-panel.db-*
 
 # 前端依赖（不应入库）
 web/node_modules/
+
+# 编译产物
+agent/agent
+master/master
