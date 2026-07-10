@@ -215,6 +215,7 @@ import MonitorsPage from "../../components/MonitorsPage.vue";
 import NodeEditModal from "../../components/NodeEditModal.vue";
 import NodeDetailDrawer from "../../components/NodeDetailDrawer.vue";
 import { Api } from "../../api";
+import { copyToClipboard } from "../../clipboard";
 import { applyTheme, THEMES, themeKey } from "../../theme";
 import {
   activeNodeId,
@@ -368,7 +369,7 @@ async function doEnroll() {
       interval: enrollInterval.value,
     });
     enrollCommand.value = d.install_cmd;
-    await copyText(d.install_cmd);
+    message.success("安装命令已生成，点击下方复制");
   } catch (e: any) {
     message.error(e?.message || "生成失败");
   } finally {
@@ -382,37 +383,13 @@ function resetEnroll() {
   enrollGroup.value = "";
 }
 
-// ── 复制（修复原 bug：两条路径都给反馈 + execCommand 兜底）──
+// ── 复制：统一走 clipboard.ts；兜底把 textarea 挂进模态框内绕过焦点陷阱 ──
 async function copyText(txt: string) {
   if (!txt) return;
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(txt);
-    } else {
-      fallbackCopy(txt);
-    }
-    message.success("已复制到剪贴板");
-  } catch {
-    try {
-      fallbackCopy(txt);
-      message.success("已复制到剪贴板");
-    } catch {
-      message.error("复制失败，请手动选择文本复制");
-    }
-  }
-}
-function fallbackCopy(txt: string) {
-  const ta = document.createElement("textarea");
-  ta.value = txt;
-  ta.style.position = "fixed";
-  ta.style.top = "0";
-  ta.style.opacity = "0";
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
-  const ok = document.execCommand("copy");
-  document.body.removeChild(ta);
-  if (!ok) throw new Error("execCommand copy failed");
+  const host = (document.querySelector(".n-modal") as HTMLElement) || undefined;
+  const ok = await copyToClipboard(txt, host);
+  if (ok) message.success("已复制到剪贴板");
+  else message.error("复制失败，请手动选择文本复制");
 }
 
 // ── 分组 ──
