@@ -34,10 +34,6 @@
     <main class="main">
       <header class="top">
         <button class="ham" @click="sideOpen = !sideOpen">☰</button>
-        <div class="search">
-          <span>🔍</span>
-          <input v-model="filterText" placeholder="搜索节点 / 国家 / 标签…" />
-        </div>
         <div class="spacer"></div>
 
         <!-- 视图切换（仅概览） -->
@@ -58,12 +54,6 @@
         <!-- ══ 概览 ══ -->
         <template v-if="page === 'dashboard'">
           <SummaryBar />
-          <div class="stats">
-            <StatCard label="在线节点" :value="`${onlineCount}/${totalCount}`" tone="g" />
-            <StatCard label="平均 CPU" :value="avgCpu.toFixed(1) + '%'" tone="b" />
-            <StatCard label="平均内存" :value="avgMem.toFixed(1) + '%'" tone="v" />
-            <StatCard label="告警节点" :value="String(alertCount)" tone="r" />
-          </div>
           <div class="listwrap">
             <div class="lhead">
               <span class="ltitle">节点（{{ visibleNodes.length }}）</span>
@@ -194,7 +184,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   NButton,
   NCheckbox,
@@ -222,24 +212,18 @@ import { applyTheme, THEMES, themeKey } from "../../theme";
 import {
   activeNodeId,
   alertCfg,
-  alertCount,
-  avgCpu,
-  avgMem,
-  filterText,
   groups,
   isOperator,
   loadGroups,
   login,
   logout,
   nodeViews,
-  onlineCount,
   publicMode,
   selectedGroup,
   sendCommand,
   startPolling,
 	systemSettings,
   terminalLogs,
-  totalCount,
   visibleNodes,
   wsConnected,
 } from "../../store";
@@ -261,19 +245,6 @@ const navPages = computed(() => {
     base.push({ k: "loginlogs", l: "登录日志", i: "≡" });
   }
   return base;
-});
-
-// 概览统计卡
-const StatCard = defineComponent({
-  props: { label: String, value: String, tone: String },
-  setup(p) {
-    const tone: Record<string, string> = { g: "#22c55e", b: "#3b82f6", v: "#8b5cf6", r: "#ef4444" };
-    return () =>
-      h("div", { class: "statcard" }, [
-        h("div", { class: "sl" }, p.label),
-        h("div", { class: "sv", style: { color: tone[p.tone || "g"] } }, p.value),
-      ]);
-  },
 });
 
 // ── 详情 / 编辑 ──
@@ -612,24 +583,6 @@ onMounted(() => {
   font-size: 20px;
   cursor: pointer;
 }
-.search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border-radius: 9px;
-  background: var(--bar-track);
-  flex: 1;
-  max-width: 420px;
-}
-.search input {
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text);
-  font-size: 13px;
-  width: 100%;
-}
 .spacer {
   flex: 1;
 }
@@ -657,37 +610,6 @@ onMounted(() => {
 .content {
   padding: 20px;
   flex: 1;
-}
-
-/* 概览统计卡 */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-  margin-bottom: 16px;
-}
-:deep(.statcard) {
-  padding: 16px 18px;
-  border-radius: 14px;
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(14px);
-}
-:deep(.statcard .sl) {
-  font-size: 13px;
-  color: var(--text-muted);
-}
-:deep(.statcard .sv) {
-  font-size: 28px;
-  font-weight: 700;
-  margin-top: 8px;
-  font-variant-numeric: tabular-nums;
-}
-@media (max-width: 700px) {
-  .stats {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 .listwrap {

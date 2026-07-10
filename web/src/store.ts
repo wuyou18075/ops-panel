@@ -133,13 +133,14 @@ export const netTotals = computed(() => {
   return { up, down };
 });
 export const trafficTotals = computed(() => {
-  let today = 0;
-  let month = 0;
+	let today = 0, month = 0, todaySent = 0, todayRecv = 0, monthSent = 0, monthRecv = 0;
   for (const t of Object.values(traffic)) {
     today += t.today || 0;
     month += t.this_month || 0;
+	todaySent += t.today_sent || 0; todayRecv += t.today_recv || 0;
+	monthSent += t.month_sent || 0; monthRecv += t.month_recv || 0;
   }
-  return { today, month };
+	return { today, month, todaySent, todayRecv, monthSent, monthRecv };
 });
 
 export function nodeById(id: string): NodeView | undefined {

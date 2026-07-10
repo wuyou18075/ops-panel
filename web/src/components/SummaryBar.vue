@@ -14,7 +14,7 @@
     </div>
     <div class="item">
       <div class="label">本月流量</div>
-      <div class="value">{{ fmtBytes(trafficTotals.month) }} <small>今日 {{ fmtBytes(trafficTotals.today) }}</small></div>
+      <div class="traffic-value"><b><span class="up">↑ {{ fmtBytes(trafficTotals.monthSent) }}</span><span class="down">↓ {{ fmtBytes(trafficTotals.monthRecv) }}</span></b><small>今日 ↑ {{ fmtBytes(trafficTotals.todaySent) }} · ↓ {{ fmtBytes(trafficTotals.todayRecv) }}</small></div>
     </div>
     <div class="item">
       <div class="label">网络速率</div>
@@ -84,6 +84,7 @@ const clock = computed(() => {
 .value .down {
   color: #e74c3c;
 }
+.traffic-value b,.traffic-value small{display:block}.traffic-value b{display:flex;justify-content:center;gap:12px;font-size:14px}.traffic-value small{font-size:10px;color:var(--text-muted);margin-top:4px}.traffic-value .up{color:#22c55e}.traffic-value .down{color:#38bdf8}
 @media (max-width: 700px) {
   .summary {
     grid-template-columns: repeat(3, 1fr);
