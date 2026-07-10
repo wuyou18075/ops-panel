@@ -31,9 +31,6 @@
         <Field label="月配额 (GB)" hint="0 = 不限">
           <NInputNumber v-model:value="quotaGB" :min="0" :precision="0" style="width: 130px" placeholder="0" />
         </Field>
-        <Field label="重置日" hint="每月几号重置 (1-28)">
-          <NInputNumber v-model:value="f.traffic_reset_day" :min="0" :max="28" style="width: 110px" placeholder="1" />
-        </Field>
 
         <div class="grp">采集</div>
         <Field label="刷新频率 (秒)"><NInputNumber v-model:value="f.interval" :min="1" :max="60" style="width: 110px" /></Field>
@@ -102,7 +99,6 @@ watch(
         billing_cycle: p.billing_cycle || "月",
         expiry_date: p.expiry_date || "",
         label: p.label || "",
-        traffic_reset_day: p.traffic_reset_day || 0,
         interval: p.interval || 2,
         enable_console: !!p.enable_console,
         track_traffic: p.track_traffic !== false,
@@ -131,7 +127,6 @@ async function save() {
       expiry_date: (f.expiry_date || "").trim(),
       label: (f.label || "").trim(),
       traffic_quota: Math.round((quotaGB.value || 0) * GiB),
-      traffic_reset_day: f.traffic_reset_day || 0,
       country_code: (f.country_code || "").trim().toUpperCase(),
       favorite: f.favorite,
       sort_order: f.sort_order || 0,

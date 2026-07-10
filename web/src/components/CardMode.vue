@@ -54,9 +54,10 @@
 
         <div class="net-info">
           <div class="line"><span>网络</span><span>↑ {{ fmtRate(n.net_sent) }} ↓ {{ fmtRate(n.net_recv) }}</span></div>
+          <div class="line"><span>今日</span><span>出↑ {{ fmtBytes(n.todaySent || 0) }} · 入↓ {{ fmtBytes(n.todayRecv || 0) }}</span></div>
           <div class="line">
-            <span>流量</span>
-            <span>{{ fmtBytes(n.cycleUsed || 0) }}<template v-if="n.quota"> / {{ fmtBytes(n.quota) }}</template></span>
+            <span>本月</span>
+            <span>出↑ {{ fmtBytes(n.monthSent || 0) }} · 入↓ {{ fmtBytes(n.monthRecv || 0) }}<template v-if="n.quota"> / {{ fmtBytes(n.quota) }}</template></span>
           </div>
           <div v-if="n.quota" class="qbar"><i :class="'fill-' + barClass(quotaPct(n))" :style="{ width: clampPct(quotaPct(n)) + '%' }"></i></div>
           <div class="line"><span>负载</span><span class="b">{{ loadStr(n) }}</span></div>

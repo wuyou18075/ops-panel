@@ -28,6 +28,7 @@
         <div v-if="cols.mem" @click="sortBy('mem')">内存 <span class="sort">{{ arrow("mem") }}</span></div>
         <div v-if="cols.disk" @click="sortBy('disk')">磁盘 <span class="sort">{{ arrow("disk") }}</span></div>
         <div v-if="cols.net" @click="sortBy('net')">网络 <span class="sort">{{ arrow("net") }}</span></div>
+        <div v-if="cols.today">今日流量</div>
         <div v-if="cols.agent">客户端</div>
         <div></div>
       </div>
@@ -52,6 +53,7 @@
           <span class="pct">{{ Number(n.disk ?? 0).toFixed(1) }}%</span>
         </div>
         <div v-if="cols.net" class="net-cell">↑{{ fmtRate(n.net_sent) }}<br />↓{{ fmtRate(n.net_recv) }}</div>
+        <div v-if="cols.today" class="net-cell">出↑{{ fmtBytes(n.todaySent || 0) }}<br />入↓{{ fmtBytes(n.todayRecv || 0) }}</div>
         <div v-if="cols.agent" class="agent-cell">
           <span class="adot" :class="n.online ? 'on' : 'off'"></span>{{ n.online ? n.agent_ver || "—" : "离线" }}
         </div>
@@ -71,16 +73,17 @@ import { computed, reactive, ref } from "vue";
 import { NPopover } from "naive-ui";
 import { filterText, isOperator, publicMode, visibleNodes } from "../store";
 import type { NodeView } from "../types";
-import { barClass, clampPct, countryFlag, fmtRate } from "../utils";
+import { barClass, clampPct, countryFlag, fmtBytes, fmtRate } from "../utils";
 
 const emit = defineEmits<{ open: [string]; edit: [NodeView] }>();
 
-const cols = reactive({ cpu: true, mem: true, disk: true, net: true, agent: true });
+const cols = reactive({ cpu: true, mem: true, disk: true, net: true, today: true, agent: true });
 const toggleable = [
   { k: "cpu", l: "CPU" },
   { k: "mem", l: "内存" },
   { k: "disk", l: "磁盘" },
   { k: "net", l: "网络" },
+  { k: "today", l: "今日流量" },
   { k: "agent", l: "客户端" },
 ] as const;
 
@@ -90,6 +93,7 @@ const gridStyle = computed(() => {
   if (cols.mem) parts.push("1.1fr");
   if (cols.disk) parts.push("1.1fr");
   if (cols.net) parts.push("0.9fr");
+  if (cols.today) parts.push("1.2fr");
   if (cols.agent) parts.push("0.8fr");
   parts.push("auto");
   return { gridTemplateColumns: parts.join(" ") };

@@ -24,13 +24,11 @@
           <div class="mi"><span>负载</span><b>{{ loadStr }}</b></div>
         </div>
 
-        <!-- 流量周期 -->
+        <!-- 流量 -->
         <div class="section" v-if="node.quota || node.today != null">
           <div class="stitle">流量</div>
-          <div class="qrow">
-            <span>本周期 {{ fmtBytes(node.cycleUsed || 0) }}<template v-if="node.quota"> / {{ fmtBytes(node.quota) }}</template></span>
-            <span class="muted">今日 {{ fmtBytes(node.today || 0) }}</span>
-          </div>
+          <div class="qrow"><span>今日</span><span>出↑ {{ fmtBytes(node.todaySent || 0) }} · 入↓ {{ fmtBytes(node.todayRecv || 0) }}</span></div>
+          <div class="qrow"><span>本月</span><span>出↑ {{ fmtBytes(node.monthSent || 0) }} · 入↓ {{ fmtBytes(node.monthRecv || 0) }}<template v-if="node.quota"> / {{ fmtBytes(node.quota) }}</template></span></div>
           <div v-if="node.quota" class="qbar"><i :class="'fill-' + barClass(quotaPct)" :style="{ width: clampPct(quotaPct) + '%' }"></i></div>
         </div>
 

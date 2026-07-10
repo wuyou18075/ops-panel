@@ -60,6 +60,10 @@ export const nodeViews = computed<NodeView[]>(() => {
       ...(st || {}),
       agent_ver: st?.agent_ver || rec?.agent_ver,
       today: tr?.today,
+      todaySent: tr?.today_sent,
+      todayRecv: tr?.today_recv,
+      monthSent: tr?.month_sent,
+      monthRecv: tr?.month_recv,
       cycleUsed: tr?.cycle_used,
       quota: tr?.quota ?? prefs.traffic_quota,
     });

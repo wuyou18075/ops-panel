@@ -13,7 +13,6 @@ export interface AgentPreferences {
   expiry_date?: string; // YYYY-MM-DD
   label?: string;
   traffic_quota?: number; // 字节
-  traffic_reset_day?: number; // 1-31
   country_code?: string; // ISO alpha-2
   favorite?: boolean;
   sort_order?: number;
@@ -54,6 +53,10 @@ export interface NodeView extends Partial<NodeStat> {
   agent_ver?: string;
   online: boolean;
   today?: number;
+  todaySent?: number;
+  todayRecv?: number;
+  monthSent?: number;
+  monthRecv?: number;
   cycleUsed?: number;
   quota?: number;
 }
@@ -63,10 +66,13 @@ export interface TrafficStats {
   group: string;
   name: string;
   today: number;
+  today_sent: number;
+  today_recv: number;
   this_month: number;
+  month_sent: number;
+  month_recv: number;
   cycle_used: number;
   quota: number;
-  reset_day: number;
 }
 
 export interface HistPoint {
