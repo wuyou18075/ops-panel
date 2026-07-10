@@ -22,7 +22,44 @@ fi
 APP_DIR="/opt/ops-panel"
 [ -d "$APP_DIR/.git" ] && (cd "$APP_DIR" && git pull) || { rm -rf "$APP_DIR"; git clone https://github.com/wuyou18075/ops-panel.git "$APP_DIR"; }
 export AGENT_ID AGENT_SECRET MASTER_URL
-cd "$APP_DIR" && go build -o /tmp/ops-agent ./agent && exec /tmp/ops-agent
+cd "$APP_DIR" && go build -o /usr/local/bin/ops-panel-agent ./agent
+if ! command -v vnstat >/dev/null 2>&1; then
+  echo "安装独立持久化流量统计 vnStat..."
+  if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y vnstat
+  elif command -v dnf >/dev/null 2>&1; then dnf install -y vnstat
+  elif command -v yum >/dev/null 2>&1; then yum install -y epel-release && yum install -y vnstat
+  elif command -v apk >/dev/null 2>&1; then apk add vnstat
+  else echo "无法识别包管理器，请手动安装 vnstat" >&2; exit 1; fi
+fi
+IFACE="$(ip route show default 2>/dev/null | awk 'NR==1{print $5}')"
+[ -n "$IFACE" ] && vnstat --add -i "$IFACE" >/dev/null 2>&1 || true
+systemctl enable --now vnstat
+mkdir -p /etc/ops-panel
+cat > /etc/ops-panel/agent.env <<EOF
+AGENT_ID=$AGENT_ID
+AGENT_SECRET=$AGENT_SECRET
+MASTER_URL=$MASTER_URL
+EOF
+chmod 600 /etc/ops-panel/agent.env
+cat > /etc/systemd/system/ops-panel-agent.service <<'EOF'
+[Unit]
+Description=Ops Panel monitoring agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/ops-panel/agent.env
+ExecStart=/usr/local/bin/ops-panel-agent
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable ops-panel-agent
+systemctl restart ops-panel-agent
+echo "Agent 已设置为开机启动且连接失败不重试；流量由独立 vnStat 服务持续记录"
 `
 
 func handleAgentInstall(w http.ResponseWriter, r *http.Request) {

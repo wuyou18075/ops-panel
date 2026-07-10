@@ -43,25 +43,25 @@ var dangerousKeywords = []string{
 }
 
 type StatData struct {
-	CPU       float64 `json:"cpu"`
-	Mem       float64 `json:"mem"`
-	Disk      float64 `json:"disk"`
-	SwapPct   float64 `json:"swap_pct"`
-	Load1     float64 `json:"load_1"`
-	Load5     float64 `json:"load_5"`
-	Load15    float64 `json:"load_15"`
-	Uptime    uint64  `json:"uptime"`
-	CPUCount  int     `json:"cpu_count"`
-	MemTotal  uint64  `json:"mem_total"`
-	DiskTotal uint64  `json:"disk_total"`
-	NetSent   float64 `json:"net_sent"`
-	NetRecv   float64 `json:"net_recv"`
-	AgentVer  string  `json:"agent_ver"`
+	CPU         float64              `json:"cpu"`
+	Mem         float64              `json:"mem"`
+	Disk        float64              `json:"disk"`
+	SwapPct     float64              `json:"swap_pct"`
+	Load1       float64              `json:"load_1"`
+	Load5       float64              `json:"load_5"`
+	Load15      float64              `json:"load_15"`
+	Uptime      uint64               `json:"uptime"`
+	CPUCount    int                  `json:"cpu_count"`
+	MemTotal    uint64               `json:"mem_total"`
+	DiskTotal   uint64               `json:"disk_total"`
+	NetSent     float64              `json:"net_sent"`
+	NetRecv     float64              `json:"net_recv"`
+	AgentVer    string               `json:"agent_ver"`
+	TrafficDays []TrafficDaySnapshot `json:"traffic_days,omitempty"`
 }
 
 func main() {
-	err := connectAndServe()
-	if err != nil {
+	if err := connectAndServe(); err != nil {
 		fmt.Println("[Agent] 连接失败:", err)
 	}
 	fmt.Println("[Agent] 进程退出")
@@ -101,6 +101,8 @@ func connectAndServe() error {
 		return err
 	}
 	defer conn.Close()
+	collectorStop := make(chan struct{})
+	defer close(collectorStop)
 
 	fmt.Println("[Agent] 注册成功，开始上报系统状态。")
 
@@ -111,14 +113,19 @@ func connectAndServe() error {
 	go func() {
 		for {
 			statData := collectStats(netSampler)
+			statData.TrafficDays = readVnStatTraffic()
 			statBytes, _ := json.Marshal(statData)
 			msg := Message{Type: "stat", AgentID: agentID, Data: string(statBytes)}
 			writeJSON(conn, &writeMutex, msg)
-			time.Sleep(interval)
+			select {
+			case <-collectorStop:
+				return
+			case <-time.After(interval):
+			}
 		}
 	}()
 
-	go startSSHCollector(conn, &writeMutex, agentID)
+	go startSSHCollector(conn, &writeMutex, agentID, collectorStop)
 
 	for {
 		var msg Message
@@ -237,8 +244,8 @@ func collectStats(netSampler *netSampler) StatData {
 	return StatData{
 		CPU: cpuVal, Mem: memVal, Disk: diskVal,
 		SwapPct: swapVal,
-		Load1: load1, Load5: load5, Load15: load15,
-		Uptime: uptimeVal,
+		Load1:   load1, Load5: load5, Load15: load15,
+		Uptime:   uptimeVal,
 		CPUCount: cpuCount, MemTotal: memTotal, DiskTotal: diskTotal,
 		NetSent: netSent, NetRecv: netRecv,
 		AgentVer: AgentVersion,
@@ -325,7 +332,7 @@ func writeJSON(conn *websocket.Conn, writeMutex *sync.Mutex, message Message) {
 type Monitor struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
-	Type     string `json:"type"`     // tcp | http | icmp
+	Type     string `json:"type"` // tcp | http | icmp
 	Target   string `json:"target"`
 	Interval int    `json:"interval"` // 秒
 	AgentID  string `json:"agent_id"`

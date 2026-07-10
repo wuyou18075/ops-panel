@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -12,7 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// sshlog.go —— 解析 /var/log/auth.log|secure 的 SSH 登录事件并上报 master。
+// sshlog.go —— 解析 auth.log/secure 或 systemd journal 的 SSH 登录事件并上报 master。
 
 type SSHEvent struct {
 	TS      int64  `json:"ts"`
@@ -24,8 +26,9 @@ type SSHEvent struct {
 
 // parseSSHLine 从一行 auth.log/secure 提取 SSH 登录事件；非登录行 ok=false。
 // 支持：
-//   Accepted password|publickey for USER from IP port N ...
-//   Failed password for [invalid user] USER from IP port N ...
+//
+//	Accepted password|publickey for USER from IP port N ...
+//	Failed password for [invalid user] USER from IP port N ...
 func parseSSHLine(line string) (SSHEvent, bool) {
 	var ev SSHEvent
 	idx := -1
@@ -74,27 +77,30 @@ var sshLogPaths = []string{"/var/log/auth.log", "/var/log/secure"}
 // sshPollInterval 是 tail 到达文件末尾后的轮询间隔（测试可调小）。
 var sshPollInterval = 2 * time.Second
 
-// startSSHCollector tail 第一个可读日志，解析新行并经 WS 上报。
-func startSSHCollector(conn *websocket.Conn, wm *sync.Mutex, agentID string) {
-	path := firstReadable(sshLogPaths)
-	if path == "" {
-		return // 无可读日志（权限不足/文件不存在）则静默退出
-	}
-	tailSSHLog(path, nil, func(ev SSHEvent) {
+// startSSHCollector 优先 tail 传统日志；没有日志文件时回退到 systemd journal。
+func startSSHCollector(conn *websocket.Conn, wm *sync.Mutex, agentID string, stop <-chan struct{}) {
+	emit := func(ev SSHEvent) {
 		b, _ := json.Marshal(ev)
 		writeJSON(conn, wm, Message{Type: "ssh_event", AgentID: agentID, Data: string(b)})
-	})
+	}
+	path := firstReadable(sshLogPaths)
+	if path != "" {
+		tailSSHLog(path, stop, emit)
+		return
+	}
+	if err := tailSSHJournal(stop, emit); err != nil {
+		fmt.Printf("[Agent] SSH 登录日志采集不可用: %v\n", err)
+	}
 }
 
 // tailSSHLog 从文件末尾 tail，解析 SSH 行并对每个事件调用 emit。
 // 启动时 seek 到末尾仅采集新事件；处理日志轮转与分片行。stop 关闭后返回（nil=永久运行）。
 func tailSSHLog(path string, stop <-chan struct{}, emit func(SSHEvent)) {
-	f, err := os.Open(path)
+	f, err := openSSHLog(path, true)
 	if err != nil {
 		return
 	}
 	defer f.Close()
-	f.Seek(0, io.SeekEnd)
 	reader := bufio.NewReader(f)
 	var partial strings.Builder
 	for {
@@ -106,10 +112,19 @@ func tailSSHLog(path string, stop <-chan struct{}, emit func(SSHEvent)) {
 		chunk, err := reader.ReadString('\n')
 		if err != nil {
 			partial.WriteString(chunk) // 累积不完整行，待下次补全
-			// 轮转检测：文件被截断/替换（当前偏移 > 文件大小）则回到开头
+			// 轮转检测：同时识别 copytruncate 和 rename+create。
 			if fi, e := os.Stat(path); e == nil {
-				if cur, _ := f.Seek(0, io.SeekCurrent); fi.Size() < cur {
-					f.Seek(0, io.SeekStart)
+				curInfo, _ := f.Stat()
+				cur, _ := f.Seek(0, io.SeekCurrent)
+				if curInfo == nil || !os.SameFile(curInfo, fi) {
+					if nf, openErr := openSSHLog(path, false); openErr == nil {
+						f.Close()
+						f = nf
+						reader.Reset(f)
+						partial.Reset()
+					}
+				} else if fi.Size() < cur {
+					_, _ = f.Seek(0, io.SeekStart)
 					reader.Reset(f)
 					partial.Reset()
 				}
@@ -130,6 +145,60 @@ func tailSSHLog(path string, stop <-chan struct{}, emit func(SSHEvent)) {
 		ev.TS = time.Now().Unix()
 		emit(ev)
 	}
+}
+
+func openSSHLog(path string, seekEnd bool) (*os.File, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if seekEnd {
+		if _, err := f.Seek(0, io.SeekEnd); err != nil {
+			f.Close()
+			return nil, err
+		}
+	}
+	return f, nil
+}
+
+// scanSSHLog 解析流中的每一行。journalctl 使用 -n 0，因此不会回放 agent 启动前的历史。
+func scanSSHLog(r io.Reader, emit func(SSHEvent)) {
+	s := bufio.NewScanner(r)
+	for s.Scan() {
+		ev, ok := parseSSHLine(strings.TrimSpace(s.Text()))
+		if !ok {
+			continue
+		}
+		ev.TS = time.Now().Unix()
+		emit(ev)
+	}
+}
+
+func tailSSHJournal(stop <-chan struct{}, emit func(SSHEvent)) error {
+	if _, err := exec.LookPath("journalctl"); err != nil {
+		return fmt.Errorf("未找到 auth.log、secure 或 journalctl")
+	}
+	cmd := exec.Command("journalctl", "--no-pager", "-n", "0", "-f", "-o", "cat", "-u", "ssh", "-u", "sshd")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	go func() {
+		scanSSHLog(stdout, emit)
+		close(done)
+	}()
+	select {
+	case <-stop:
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil
+	case <-done:
+	}
+	return cmd.Wait()
 }
 
 func firstReadable(paths []string) string {

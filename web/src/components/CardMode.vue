@@ -47,26 +47,39 @@
           <span v-if="n.prefs.label" class="badge">{{ n.prefs.label }}</span>
         </div>
 
-        <div class="specs">
-          <span><i class="dot"></i>{{ n.cpu_count || 0 }} 核</span>
-          <span><i class="dot"></i>{{ fmtCap(n.mem_total) }}</span>
-          <span><i class="dot"></i>{{ fmtCap(n.disk_total) }}</span>
+        <div class="signal-row">
+          <div class="signal"><span class="signal-label">实时上行</span><b class="up">↑ {{ fmtRate(n.net_sent) }}</b></div>
+          <div class="signal"><span class="signal-label">实时下行</span><b class="down">↓ {{ fmtRate(n.net_recv) }}</b></div>
+          <div class="signal"><span class="signal-label">平均延迟</span><b>{{ n.latencyMs == null ? "--" : n.latencyMs + " ms" }}</b></div>
         </div>
 
-        <div class="metric" v-for="m in metrics(n)" :key="m.k">
-          <div class="row"><span class="k">{{ m.k }}</span><span class="v">{{ m.t }}</span></div>
-          <div class="bar"><i :class="'fill-' + barClass(m.p)" :style="{ width: clampPct(m.p) + '%' }"></i></div>
-        </div>
-
-        <div class="net-info">
-          <div class="line"><span>网络</span><span>↑ {{ fmtRate(n.net_sent) }} ↓ {{ fmtRate(n.net_recv) }}</span></div>
-          <div class="line"><span>今日</span><span>出↑ {{ fmtBytes(n.todaySent || 0) }} · 入↓ {{ fmtBytes(n.todayRecv || 0) }}</span></div>
-          <div class="line">
-            <span>本月</span>
-            <span>出↑ {{ fmtBytes(n.monthSent || 0) }} · 入↓ {{ fmtBytes(n.monthRecv || 0) }}<template v-if="n.quota"> / {{ fmtBytes(n.quota) }}</template></span>
-          </div>
+        <div class="traffic-box">
+          <div class="traffic-head"><span>本月流量</span><b>{{ fmtBytes(n.cycleUsed || 0) }}<small v-if="n.quota"> / {{ fmtBytes(n.quota) }}</small></b></div>
           <div v-if="n.quota" class="qbar"><i :class="'fill-' + barClass(quotaPct(n))" :style="{ width: clampPct(quotaPct(n)) + '%' }"></i></div>
-          <div class="line"><span>负载</span><span class="b">{{ loadStr(n) }}</span></div>
+          <div class="traffic-grid">
+            <div><span>今日发出</span><b class="up">↑ {{ fmtBytes(n.todaySent || 0) }}</b></div>
+            <div><span>今日接收</span><b class="down">↓ {{ fmtBytes(n.todayRecv || 0) }}</b></div>
+            <div><span>本月发出</span><b>↑ {{ fmtBytes(n.monthSent || 0) }}</b></div>
+            <div><span>本月接收</span><b>↓ {{ fmtBytes(n.monthRecv || 0) }}</b></div>
+          </div>
+        </div>
+
+        <div class="ops-row">
+          <span>负载 <b>{{ loadStr(n) }}</b></span>
+          <span :class="(n.sshFailWeek || 0) ? 'ssh-warn' : 'ssh-ok'">SSH {{ (n.sshFailWeek || 0) ? '失败 ' + n.sshFailWeek : '正常' }}</span>
+        </div>
+
+        <div class="specs">
+          <span>{{ n.cpu_count || 0 }} 核 CPU</span><i></i>
+          <span>{{ fmtCap(n.mem_total) }} 内存</span><i></i>
+          <span>{{ fmtCap(n.disk_total) }} 磁盘</span>
+        </div>
+
+        <div class="health-grid">
+          <div class="metric" v-for="m in metrics(n)" :key="m.k">
+            <div class="row"><span class="k">{{ m.k }}</span><span class="v">{{ m.t }}</span></div>
+            <div class="bar"><i :class="'fill-' + barClass(m.p)" :style="{ width: clampPct(m.p) + '%' }"></i></div>
+          </div>
         </div>
 
         <div class="card-foot">
@@ -271,7 +284,7 @@ function isExpiringSoon(n: NodeView): boolean {
   gap: 14px;
   font-size: 12px;
   color: var(--text-muted);
-  margin-bottom: 12px;
+  margin: 12px 0 10px;
   flex-wrap: wrap;
 }
 .specs span {
@@ -279,13 +292,27 @@ function isExpiringSoon(n: NodeView): boolean {
   align-items: center;
   gap: 3px;
 }
-.specs .dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ca);
-  display: inline-block;
-}
+.specs > i { width: 3px; height: 3px; border-radius: 50%; background: var(--text-muted); opacity: .5; }
+.signal-row { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:8px 0 10px; }
+.signal { min-width:0; padding:9px 8px; border-radius:10px; background:color-mix(in srgb,var(--ca) 7%,var(--glass)); border:1px solid color-mix(in srgb,var(--ca) 16%,transparent); }
+.signal-label { display:block; font-size:9px; color:var(--text-muted); margin-bottom:3px; }
+.signal b { display:block; font-size:12px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.up { color:#22c55e !important; }
+.down { color:#38bdf8 !important; }
+.traffic-box { padding:12px; border-radius:12px; background:color-mix(in srgb,var(--bg-panel) 68%,transparent); border:1px solid var(--color-line); }
+.traffic-head { display:flex; justify-content:space-between; align-items:baseline; font-size:11px; color:var(--text-muted); }
+.traffic-head b { color:var(--ct); font-size:15px; }
+.traffic-head small { font-size:10px; color:var(--text-muted); font-weight:500; }
+.traffic-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px 12px; margin-top:9px; }
+.traffic-grid div { display:flex; justify-content:space-between; gap:5px; font-size:10px; color:var(--text-muted); }
+.traffic-grid b { color:var(--text); font-size:10px; white-space:nowrap; }
+.ops-row { display:flex; justify-content:space-between; align-items:center; margin-top:9px; font-size:10px; color:var(--text-muted); }
+.ops-row b { color:var(--text); margin-left:4px; }
+.ssh-ok { color:#22c55e; }
+.ssh-warn { color:#ef4444; font-weight:700; }
+.health-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; padding-top:10px; border-top:1px solid var(--color-line); }
+.health-grid .metric { margin:0; }
+.health-grid .bar { height:5px; }
 
 .metric {
   margin-bottom: 7px;
@@ -315,28 +342,12 @@ function isExpiringSoon(n: NodeView): boolean {
   border-radius: 5px;
 }
 
-.net-info {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--color-line);
-  font-size: 11px;
-  color: var(--text-muted);
-  line-height: 1.9;
-}
-.net-info .line {
-  display: flex;
-  justify-content: space-between;
-}
-.net-info .b {
-  font-weight: 600;
-  color: var(--text);
-}
 .qbar {
   height: 5px;
   border-radius: 3px;
   background: var(--bar-track);
   overflow: hidden;
-  margin: 2px 0 4px;
+  margin: 7px 0 4px;
 }
 .qbar > i {
   display: block;

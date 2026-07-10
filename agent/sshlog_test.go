@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sync"
@@ -10,9 +11,9 @@ import (
 
 func TestParseSSHLine(t *testing.T) {
 	cases := []struct {
-		line                    string
-		ok, success             bool
-		user, ip, method        string
+		line             string
+		ok, success      bool
+		user, ip, method string
 	}{
 		{"Jul 10 12:00:00 h sshd[1]: Accepted password for root from 1.2.3.4 port 22 ssh2", true, true, "root", "1.2.3.4", "password"},
 		{"Jul 10 12:00:00 h sshd[1]: Accepted publickey for alice from 5.6.7.8 port 22 ssh2", true, true, "alice", "5.6.7.8", "publickey"},
@@ -31,6 +32,18 @@ func TestParseSSHLine(t *testing.T) {
 		if ev.Success != c.success || ev.User != c.user || ev.IP != c.ip || ev.Method != c.method {
 			t.Errorf("解析错 %q -> %+v", c.line, ev)
 		}
+	}
+}
+
+func TestScanSSHLog(t *testing.T) {
+	input := bytes.NewBufferString("ignored\nAccepted publickey for alice from 2001:db8::1 port 22 ssh2\n")
+	var got []SSHEvent
+	scanSSHLog(input, func(ev SSHEvent) { got = append(got, ev) })
+	if len(got) != 1 || got[0].User != "alice" || got[0].IP != "2001:db8::1" || !got[0].Success {
+		t.Fatalf("journal 输出解析错误: %+v", got)
+	}
+	if got[0].TS == 0 {
+		t.Fatal("TS 未设置")
 	}
 }
 
@@ -78,5 +91,49 @@ func TestTailSSHLog(t *testing.T) {
 	}
 	if got[0].TS == 0 {
 		t.Errorf("TS 未设置")
+	}
+}
+
+func TestTailSSHLogAfterRotation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.log")
+	os.WriteFile(path, []byte("old log content long enough\n"), 0o644)
+
+	old := sshPollInterval
+	sshPollInterval = 30 * time.Millisecond
+	defer func() { sshPollInterval = old }()
+
+	var mu sync.Mutex
+	var got []SSHEvent
+	stop := make(chan struct{})
+	go tailSSHLog(path, stop, func(ev SSHEvent) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	})
+	t.Cleanup(func() { close(stop) })
+	time.Sleep(100 * time.Millisecond)
+
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	line := "Jul 10 12:00:00 h sshd[1]: Accepted password for root from 1.2.3.4 port 22 ssh2\n"
+	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(got)
+		mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || got[0].IP != "1.2.3.4" || !got[0].Success {
+		t.Fatalf("轮转后事件未采集: %+v", got)
 	}
 }

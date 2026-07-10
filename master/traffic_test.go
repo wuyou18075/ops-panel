@@ -47,3 +47,12 @@ func TestTrafficPersistRoundTrip(t *testing.T) {
 		t.Fatalf("往返错: %+v", got)
 	}
 }
+
+func TestIngestTrafficSnapshotUsesAgentLedger(t *testing.T) {
+	traffic = map[string]*TrafficDay{"n1|2026-07-11": {Date: "2026-07-11", Sent: 10, Recv: 20}}
+	ingestTrafficSnapshot("n1", []agentTrafficDay{{Date: "2026-07-11", Sent: 100, Recv: 200}})
+	got := traffic["n1|2026-07-11"]
+	if got == nil || got.Sent != 100 || got.Recv != 200 {
+		t.Fatalf("agent 权威快照未覆盖: %+v", got)
+	}
+}

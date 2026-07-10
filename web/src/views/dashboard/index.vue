@@ -95,7 +95,7 @@
             <div class="termnodes">
               <div class="tn-h">在线节点</div>
               <div
-                v-for="n in nodeViews"
+                v-for="n in consoleNodes"
                 :key="n.id"
                 class="tn"
                 :class="{ act: activeNodeId === n.id }"
@@ -166,6 +166,11 @@
           <NCheckbox v-model:checked="enrollReport">日报</NCheckbox>
         </div>
         <div class="erow"><span>刷新频率</span><NInputNumber v-model:value="enrollInterval" :min="1" :max="60" style="width: 100px" /><span class="unit">秒</span></div>
+        <div class="erow">
+          <span>月流量额度</span>
+          <NInputNumber v-model:value="enrollQuota" :min="1" :precision="0" style="width: 150px" />
+          <NSelect v-model:value="enrollQuotaUnit" :options="quotaUnitOptions" style="width: 92px" />
+        </div>
 
         <div v-if="enrollCommand" class="cmdbox" @click="copyText(enrollCommand, $event)">
           <div class="cbh">在目标 VPS 上执行（点击复制）：</div>
@@ -189,7 +194,7 @@
 
     <!-- ── 节点编辑 / 详情 ── -->
     <NodeEditModal v-model:show="showEdit" :node="editNode" @saved="onEdited" />
-    <NodeDetailDrawer v-model:show="showDetail" :node-id="detailId" @edit="openEdit" />
+    <NodeDetailDrawer v-model:show="showDetail" :node-id="detailId" @edit="openEdit" @console="openConsole" />
   </div>
 </template>
 
@@ -345,9 +350,13 @@ const enrollConsole = ref(false);
 const enrollTraffic = ref(true);
 const enrollReport = ref(false);
 const enrollInterval = ref(3);
+const enrollQuota = ref(1000);
+const enrollQuotaUnit = ref("GB");
+const quotaUnitOptions = ["MB", "GB", "T"].map((v) => ({ label: v, value: v }));
 const enrollCommand = ref("");
 const enrolling = ref(false);
 const groupOptions = computed(() => groups.value.map((g) => ({ label: g, value: g })));
+const consoleNodes = computed(() => nodeViews.value.filter((n) => n.prefs.enable_console));
 function openEnroll() {
   if (!isOperator.value) {
     message.warning("请先登录");
@@ -370,6 +379,7 @@ async function doEnroll() {
       track_traffic: enrollTraffic.value,
       daily_report: enrollReport.value,
       interval: enrollInterval.value,
+	  traffic_quota: Math.round(enrollQuota.value * ({ MB: 1024 ** 2, GB: 1024 ** 3, T: 1024 ** 4 }[enrollQuotaUnit.value] || 1024 ** 3)),
     });
     enrollCommand.value = d.install_cmd;
     message.success("安装命令已生成，点击下方复制");
@@ -384,6 +394,8 @@ function resetEnroll() {
   enrollCommand.value = "";
   enrollName.value = "";
   enrollGroup.value = "";
+	enrollQuota.value = 1000;
+	enrollQuotaUnit.value = "GB";
 }
 
 // ── 复制：统一走 clipboard.ts；兜底把 textarea 挂进当前模态框内绕过焦点陷阱 ──
@@ -425,6 +437,11 @@ const quickCmds = ["df -h", "free -m", "uptime", "docker ps", "systemctl --faile
 function pickTermNode(id: string) {
   activeNodeId.value = id;
   terminalLogs.value = [];
+}
+function openConsole(n: NodeView) {
+	showDetail.value = false;
+	page.value = "terminal";
+	pickTermNode(n.id);
 }
 function runCmd() {
   const cmd = shellCommand.value.trim();

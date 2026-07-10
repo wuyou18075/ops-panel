@@ -53,6 +53,7 @@ export const nodeViews = computed<NodeView[]>(() => {
     const iv = prefs.interval || 2;
     const online = st ? nowMs.value - (st.updatedAt || 0) < Math.max(10000, iv * 2500) : false;
     const tr = traffic[id];
+	const latencySamples = monitors.value.filter((m) => m.agent_id === id && m.up && m.latency_ms >= 0).map((m) => m.latency_ms);
     list.push({
       id,
       name: rec?.name || "",
@@ -68,6 +69,7 @@ export const nodeViews = computed<NodeView[]>(() => {
       cycleUsed: tr?.cycle_used,
       quota: tr?.quota ?? prefs.traffic_quota,
       sshFailWeek: sshFails[id],
+	  latencyMs: latencySamples.length ? Math.round(latencySamples.reduce((a, b) => a + b, 0) / latencySamples.length) : undefined,
     });
   }
   // 收藏优先 → sort_order → 名称

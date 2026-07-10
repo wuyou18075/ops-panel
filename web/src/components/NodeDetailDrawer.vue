@@ -7,6 +7,7 @@
           <span class="nm">{{ node.name || node.id }}</span>
           <span class="badge" :class="node.online ? 'on' : 'off'">{{ node.online ? "在线" : "离线" }}</span>
           <div style="flex: 1"></div>
+          <NButton v-if="!publicMode && isOperator && node.prefs.enable_console" size="small" type="primary" secondary @click="emit('console', node)">控制台</NButton>
           <NButton v-if="!publicMode && isOperator" size="small" tertiary @click="emit('edit', node)">编辑</NButton>
         </div>
       </template>
@@ -83,7 +84,7 @@ import type { HistPoint, NodeView, SSHLog } from "../types";
 import { barClass, clampPct, countryFlag, expiryLabel, fmtBytes, fmtCap, fmtRate, fmtUptime, priceLabel } from "../utils";
 
 const props = defineProps<{ show: boolean; nodeId: string }>();
-const emit = defineEmits<{ "update:show": [boolean]; edit: [NodeView] }>();
+const emit = defineEmits<{ "update:show": [boolean]; edit: [NodeView]; console: [NodeView] }>();
 
 const hist = ref<HistPoint[]>([]);
 const sshLogs = ref<SSHLog[]>([]);

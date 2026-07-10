@@ -60,6 +60,7 @@ export interface NodeView extends Partial<NodeStat> {
   cycleUsed?: number;
   quota?: number;
   sshFailWeek?: number;
+	latencyMs?: number;
 }
 
 export interface TrafficStats {
