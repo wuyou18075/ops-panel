@@ -164,13 +164,13 @@
         </div>
         <div class="erow"><span>刷新频率</span><NInputNumber v-model:value="enrollInterval" :min="1" :max="60" style="width: 100px" /><span class="unit">秒</span></div>
 
-        <div v-if="enrollCommand" class="cmdbox" @click="copyText(enrollCommand)">
+        <div v-if="enrollCommand" class="cmdbox" @click="copyText(enrollCommand, $event)">
           <div class="cbh">在目标 VPS 上执行（点击复制）：</div>
           <div class="cbc">{{ enrollCommand }}</div>
         </div>
         <NButton v-if="!enrollCommand" type="primary" block :loading="enrolling" @click="doEnroll">生成安装命令</NButton>
         <NSpace v-else>
-          <NButton type="primary" @click="copyText(enrollCommand)">复制命令</NButton>
+          <NButton type="primary" @click="copyText(enrollCommand, $event)">复制命令</NButton>
           <NButton @click="resetEnroll">完成</NButton>
         </NSpace>
       </NSpace>
@@ -381,10 +381,14 @@ function resetEnroll() {
   enrollGroup.value = "";
 }
 
-// ── 复制：统一走 clipboard.ts；兜底把 textarea 挂进模态框内绕过焦点陷阱 ──
-async function copyText(txt: string) {
+// ── 复制：统一走 clipboard.ts；兜底把 textarea 挂进当前模态框内绕过焦点陷阱 ──
+async function copyText(txt: string, ev?: Event) {
   if (!txt) return;
-  const host = (document.querySelector(".n-modal") as HTMLElement) || undefined;
+  const trigger = ev?.currentTarget as HTMLElement | undefined;
+  const host =
+    (trigger?.closest(".n-modal") as HTMLElement) ||
+    (document.querySelector(".n-modal") as HTMLElement) ||
+    undefined;
   const ok = await copyToClipboard(txt, host);
   if (ok) message.success("已复制到剪贴板");
   else message.error("复制失败，请手动选择文本复制");
