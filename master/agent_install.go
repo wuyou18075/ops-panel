@@ -10,7 +10,7 @@ AGENT_ID="${AGENT_ID:?未设置 AGENT_ID}"
 AGENT_SECRET="${AGENT_SECRET:?未设置 AGENT_SECRET}"
 MASTER_URL="${MASTER_URL:-${MASTER:?未设置 MASTER_URL}}"
 if ! command -v go &>/dev/null; then
-  GF="go1.21.6.$(uname -m|sed 's/x86_64/linux-amd64/;s/aarch64/linux-arm64/').tar.gz"
+  GF="go1.25.0.$(uname -m|sed 's/x86_64/linux-amd64/;s/aarch64/linux-arm64/').tar.gz"
   wget -q "https://golang.google.cn/dl/$GF" -O /tmp/go.tar.gz
   tar -C /usr/local -xzf /tmp/go.tar.gz; rm /tmp/go.tar.gz
   export PATH="$PATH:/usr/local/go/bin"
