@@ -7,6 +7,7 @@ import type {
   LoginLog,
   Monitor,
   MonitorView,
+  SSHLog,
   TrafficStats,
 } from "./types";
 
@@ -136,5 +137,21 @@ export const Api = {
   },
   clearLoginLogs() {
     return fetch(api("/api/login-logs"), { method: "DELETE", headers: authHeaders() }).then(parse);
+  },
+  sshLogs(agent_id: string): Promise<SSHLog[]> {
+    return fetch(api("/api/ssh-logs?agent_id=" + encodeURIComponent(agent_id)), { headers: authHeaders() }).then(parse);
+  },
+  clearSshLogs(agent_id: string) {
+    return fetch(api("/api/ssh-logs?agent_id=" + encodeURIComponent(agent_id)), { method: "DELETE", headers: authHeaders() }).then(parse);
+  },
+  sshStats(): Promise<{ agent_id: string; week_fails: number }[]> {
+    return fetch(api("/api/ssh-stats")).then(parse);
+  },
+  resetSshFails(agent_id: string) {
+    return fetch(api("/api/ssh-fails/reset"), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ agent_id }),
+    }).then(parse);
   },
 };

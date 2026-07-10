@@ -26,6 +26,12 @@
           <div class="name">
             <span class="flag">{{ countryFlag(n.prefs.country_code) }}</span>
             <span class="nm">{{ n.name || n.id }}</span>
+            <span
+              v-if="(n.sshFailWeek || 0) >= 3"
+              class="sshbadge"
+              :class="(n.sshFailWeek || 0) >= 5 ? 'red' : 'yellow'"
+              :title="'本周 SSH 登录失败 ' + n.sshFailWeek + ' 次'"
+            >SSH失败 {{ n.sshFailWeek }}</span>
           </div>
           <span
             class="star"
@@ -209,6 +215,22 @@ function isExpiringSoon(n: NodeView): boolean {
   cursor: pointer;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+.sshbadge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.sshbadge.yellow {
+  background: #f59e0b;
+  color: #111;
+}
+.sshbadge.red {
+  background: #ef4444;
+  color: #fff;
 }
 .star.on {
   color: #f1c40f;

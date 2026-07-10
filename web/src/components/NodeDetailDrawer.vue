@@ -32,6 +32,24 @@
           <div v-if="node.quota" class="qbar"><i :class="'fill-' + barClass(quotaPct)" :style="{ width: clampPct(quotaPct) + '%' }"></i></div>
         </div>
 
+        <!-- SSH 登录 -->
+        <div class="section" v-if="isOperator">
+          <div class="stitle sshhead">
+            <span>SSH 登录<span class="muted" v-if="(node.sshFailWeek || 0) > 0"> · 本周失败 {{ node.sshFailWeek }} 次</span></span>
+            <span class="sshacts">
+              <button class="lnk" @click="resetFails">重置失败</button>
+              <button class="lnk" @click="clearSSH">清空</button>
+            </span>
+          </div>
+          <div v-if="sshLogs.length === 0" class="muted sshempty">暂无 SSH 登录记录</div>
+          <div v-for="(l, i) in sshLogs.slice(0, 50)" :key="i" class="sshrow">
+            <span :class="l.success ? 'ok' : 'fail'">{{ l.success ? "成功" : "失败" }}</span>
+            <span class="u">{{ l.user }}</span>
+            <span class="ip">{{ l.ip }}</span>
+            <span class="loc">{{ l.location || "-" }}</span>
+          </div>
+        </div>
+
         <!-- 当前指标 -->
         <div class="section">
           <div class="stitle">当前</div>
@@ -57,17 +75,19 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { NButton, NDrawer, NDrawerContent } from "naive-ui";
+import { NButton, NDrawer, NDrawerContent, useMessage } from "naive-ui";
 import Sparkline from "./Sparkline.vue";
 import { Api } from "../api";
 import { isOperator, nodeById, publicMode } from "../store";
-import type { HistPoint, NodeView } from "../types";
+import type { HistPoint, NodeView, SSHLog } from "../types";
 import { barClass, clampPct, countryFlag, expiryLabel, fmtBytes, fmtCap, fmtRate, fmtUptime, priceLabel } from "../utils";
 
 const props = defineProps<{ show: boolean; nodeId: string }>();
 const emit = defineEmits<{ "update:show": [boolean]; edit: [NodeView] }>();
 
 const hist = ref<HistPoint[]>([]);
+const sshLogs = ref<SSHLog[]>([]);
+const message = useMessage();
 let timer: number | undefined;
 
 const drawerWidth = computed(() => Math.min(560, window.innerWidth - 20));
@@ -116,12 +136,39 @@ async function fetchHistory() {
   }
 }
 
+async function fetchSSH() {
+  if (!props.nodeId || !isOperator.value) return;
+  try {
+    sshLogs.value = await Api.sshLogs(props.nodeId);
+  } catch {
+    /* ignore */
+  }
+}
+async function clearSSH() {
+  try {
+    await Api.clearSshLogs(props.nodeId);
+    sshLogs.value = [];
+    message.success("已清空");
+  } catch (e: any) {
+    message.error(e?.message || "清空失败");
+  }
+}
+async function resetFails() {
+  try {
+    await Api.resetSshFails(props.nodeId);
+    message.success("已重置本周失败计数");
+  } catch (e: any) {
+    message.error(e?.message || "重置失败");
+  }
+}
+
 watch(
   () => [props.show, props.nodeId],
   () => {
     clearInterval(timer);
     if (props.show && props.nodeId) {
       fetchHistory();
+      fetchSSH();
       timer = window.setInterval(fetchHistory, 30000);
     }
   },
@@ -194,6 +241,46 @@ watch(
 .muted {
   color: var(--text-muted);
   font-weight: 400;
+}
+.sshhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.sshacts {
+  display: flex;
+  gap: 10px;
+}
+.lnk {
+  background: none;
+  border: none;
+  color: var(--ca);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+.sshempty {
+  font-size: 12px;
+}
+.sshrow {
+  display: grid;
+  grid-template-columns: 40px 1fr 1.2fr 1.4fr;
+  gap: 8px;
+  font-size: 11px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--color-line);
+  color: var(--text-muted);
+  align-items: center;
+}
+.sshrow .ok {
+  color: #22c55e;
+}
+.sshrow .fail {
+  color: #ef4444;
+  font-weight: 600;
+}
+.sshrow .u {
+  color: var(--text);
 }
 
 .metric {

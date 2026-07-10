@@ -59,6 +59,7 @@ export interface NodeView extends Partial<NodeStat> {
   monthRecv?: number;
   cycleUsed?: number;
   quota?: number;
+  sshFailWeek?: number;
 }
 
 export interface TrafficStats {
@@ -122,6 +123,15 @@ export interface LoginLog {
   location: string;
   device: string;
   username: string;
+}
+
+export interface SSHLog {
+  ts: number;
+  ip: string;
+  location: string;
+  user: string;
+  method: string;
+  success: boolean;
 }
 
 export type ThemeKey = "dark" | "green" | "gray" | "sepia" | "purple";

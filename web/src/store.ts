@@ -17,6 +17,7 @@ export const publicMode =
 const nodes = reactive<Record<string, NodeStat>>({}); // 实时指标
 const agents = reactive<Record<string, AgentRecord>>({}); // 元数据
 const traffic = reactive<Record<string, TrafficStats>>({}); // 流量
+const sshFails = reactive<Record<string, number>>({}); // 每节点周 SSH 失败数
 export const monitors = ref<MonitorView[]>([]);
 export const groups = ref<string[]>(["默认分组"]);
 export const alertCfg = ref<AlertConfig>({
@@ -66,6 +67,7 @@ export const nodeViews = computed<NodeView[]>(() => {
       monthRecv: tr?.month_recv,
       cycleUsed: tr?.cycle_used,
       quota: tr?.quota ?? prefs.traffic_quota,
+      sshFailWeek: sshFails[id],
     });
   }
   // 收藏优先 → sort_order → 名称
@@ -252,6 +254,14 @@ export async function loadTraffic(): Promise<void> {
     /* ignore */
   }
 }
+export async function loadSshStats(): Promise<void> {
+  try {
+    const list = await Api.sshStats();
+    for (const s of list) sshFails[s.agent_id] = s.week_fails;
+  } catch {
+    /* ignore */
+  }
+}
 export async function loadMonitors(): Promise<void> {
   try {
     monitors.value = await Api.monitors();
@@ -266,9 +276,11 @@ export function startPolling(): void {
   loadGroups();
   loadAlerts();
   loadTraffic();
+  loadSshStats();
   loadMonitors();
   window.setInterval(() => (nowMs.value = Date.now()), 1000);
   window.setInterval(loadTraffic, 30000);
+  window.setInterval(loadSshStats, 30000);
   window.setInterval(loadAgents, 20000);
   window.setInterval(loadMonitors, 15000);
 }
