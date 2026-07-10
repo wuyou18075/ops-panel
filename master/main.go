@@ -170,6 +170,7 @@ func registerRoutes() {
 	http.HandleFunc(masterPath+"/api/history", handleHistory)
 	http.HandleFunc(masterPath+"/api/monitors", handleMonitors)
 	http.HandleFunc(masterPath+"/api/settings", handleSystemSettings)
+	http.HandleFunc(masterPath+"/api/alert-events", handleAlertEvents)
 	http.HandleFunc(masterPath+"/api/login-logs", handleLoginLogs)
 	http.HandleFunc(masterPath+"/api/ssh-logs", handleSSHLogs)
 	http.HandleFunc(masterPath+"/api/ssh-stats", handleSSHStats)
@@ -242,6 +243,14 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 			}
 			if json.Unmarshal([]byte(msg.Data), &ev) == nil {
 				insertSSHLogin(agentID, ev.TS, ev.IP, lookupLocation(ev.IP), ev.User, ev.Method, ev.Success)
+			}
+		case "process_snapshot":
+			var p struct {
+				RecordID int64  `json:"record_id"`
+				Output   string `json:"output"`
+			}
+			if json.Unmarshal([]byte(msg.Data), &p) == nil && p.RecordID > 0 {
+				db.Exec("UPDATE alert_events SET detail=detail||? WHERE id=?", "\n\n当时占用前五进程：\n"+p.Output, p.RecordID)
 			}
 		case "log":
 			broadcastToWeb(msgBytes)
@@ -375,6 +384,15 @@ func dispatchCommand(agentID, cmdStr string) {
 	nonce := time.Now().Unix()
 	sig := signCommand(rec.Secret, agentID, cmdStr, nonce)
 	sconn.Write(mustJSON(Message{Type: "cmd", AgentID: agentID, Data: cmdStr, Nonce: nonce, Sig: sig}))
+}
+
+func requestProcessSnapshot(agentID string, recordID int64) {
+	agentMutex.RLock()
+	s, ok := agentConns[agentID]
+	agentMutex.RUnlock()
+	if ok {
+		s.Write(mustJSON(Message{Type: "process_snapshot", AgentID: agentID, Data: fmt.Sprintf("%d", recordID)}))
+	}
 }
 
 func broadcastToWeb(message []byte) {
@@ -827,7 +845,7 @@ func checkTrafficQuota() {
 		if s.Quota <= 0 || s.CycleUsed < s.Quota {
 			continue
 		}
-		cycleKey := now.Format("2006-01")
+		cycleKey := now.Format("2006-01-02")
 		trafficAlertMu.Lock()
 		already := trafficAlerted[s.AgentID] == cycleKey
 		if !already {
@@ -841,7 +859,9 @@ func checkTrafficQuota() {
 		if name == "" {
 			name = s.AgentID
 		}
-		sendTGAlert(fmt.Sprintf("⚠️ 流量超额：%s 本月已用 %s / 配额 %s", name, humanBytes(s.CycleUsed), humanBytes(s.Quota)))
+		msg := fmt.Sprintf("⚠️ 流量超额：%s 本月已用 %s / 配额 %s", name, humanBytes(s.CycleUsed), humanBytes(s.Quota))
+		sendTGAlert(msg)
+		insertAlertEvent(s.AgentID, "traffic", "流量警报", msg)
 	}
 }
 

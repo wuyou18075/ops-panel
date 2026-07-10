@@ -20,13 +20,6 @@
           <span class="nicon">{{ p.i }}</span>{{ p.l }}
         </div>
       </nav>
-      <div class="groups">
-        <div class="ghead">
-          <span>分组</span>
-        </div>
-        <div class="gi" :class="{ act: selectedGroup === '全部' }" @click="selectedGroup = '全部'">全部节点</div>
-        <div v-for="g in groups" :key="g" class="gi" :class="{ act: selectedGroup === g }" @click="selectedGroup = g">{{ g }}</div>
-      </div>
     </aside>
     <div v-if="sideOpen" class="scrim" @click="sideOpen = false"></div>
 
@@ -35,12 +28,6 @@
       <header class="top">
         <button class="ham" @click="sideOpen = !sideOpen">☰</button>
         <div class="spacer"></div>
-
-        <!-- 视图切换（仅概览） -->
-        <div v-if="page === 'dashboard'" class="seg">
-          <button :class="{ on: viewMode === 'cards' }" @click="viewMode = 'cards'">卡片</button>
-          <button :class="{ on: viewMode === 'table' }" @click="viewMode = 'table'">表格</button>
-        </div>
 
         <NTag :type="wsConnected ? 'success' : 'error'" size="small" round>{{ wsConnected ? "已连接" : "重连中" }}</NTag>
 
@@ -58,6 +45,7 @@
             <div class="lhead">
               <span class="ltitle">节点（{{ visibleNodes.length }}）</span>
               <div class="lhead-actions" v-if="!publicMode && isOperator">
+                <div class="seg"><button :class="{ on: viewMode === 'cards' }" @click="viewMode = 'cards'">卡片</button><button :class="{ on: viewMode === 'table' }" @click="viewMode = 'table'">表格</button></div>
                 <NButton size="small" @click="showAddGroup = true">+ 添加分组</NButton>
                 <NButton type="primary" size="small" @click="openEnroll">+ 添加节点</NButton>
               </div>
@@ -66,9 +54,7 @@
             <TableMode v-else @open="openDetail" @edit="openEdit" />
           </div>
         </template>
-
-        <!-- ══ 服务监控 ══ -->
-        <MonitorsPage v-else-if="page === 'monitors'" />
+		<AlertEventsPage v-else-if="page === 'events' && !publicMode" />
 
         <!-- ══ 命令终端 ══ -->
         <template v-else-if="page === 'terminal' && !publicMode">
@@ -202,10 +188,10 @@ import {
 import CardMode from "../../components/CardMode.vue";
 import TableMode from "../../components/TableMode.vue";
 import SummaryBar from "../../components/SummaryBar.vue";
-import MonitorsPage from "../../components/MonitorsPage.vue";
 import LoginLogsPage from "../../components/LoginLogsPage.vue";
 import NodeEditModal from "../../components/NodeEditModal.vue";
 import NodeDetailDrawer from "../../components/NodeDetailDrawer.vue";
+import AlertEventsPage from "../../components/AlertEventsPage.vue";
 import { Api } from "../../api";
 import { copyToClipboard } from "../../clipboard";
 import { applyTheme, THEMES, themeKey } from "../../theme";
@@ -219,7 +205,6 @@ import {
   logout,
   nodeViews,
   publicMode,
-  selectedGroup,
   sendCommand,
   startPolling,
 	systemSettings,
@@ -237,7 +222,7 @@ const sideOpen = ref(false);
 const navPages = computed(() => {
   const base = [
     { k: "dashboard", l: "监控概览", i: "▤" },
-    { k: "monitors", l: "服务监控", i: "◎" },
+	{ k: "events", l: "告警记录", i: "!" },
   ];
   if (!publicMode) {
     base.push({ k: "terminal", l: "命令终端", i: "⌘" });

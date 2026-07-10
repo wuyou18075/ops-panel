@@ -98,6 +98,7 @@ export interface Monitor {
 }
 
 export interface SystemSettings { probe_interval:number; probe_type:string; latency_templates:{id:string;name:string;target:string}[] }
+export interface AlertEvent {id:number;ts:number;agent_id:string;kind:string;title:string;detail:string}
 
 export interface ProbeResult {
   monitor_id: string;

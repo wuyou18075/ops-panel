@@ -29,6 +29,9 @@
         <div v-if="cols.disk" @click="sortBy('disk')">磁盘 <span class="sort">{{ arrow("disk") }}</span></div>
         <div v-if="cols.net" @click="sortBy('net')">网络 <span class="sort">{{ arrow("net") }}</span></div>
         <div v-if="cols.today">今日流量</div>
+        <div v-if="cols.month">本月流量</div>
+        <div v-if="cols.latency" @click="sortBy('latencyMs')">延迟 <span class="sort">{{ arrow("latencyMs") }}</span></div>
+        <div v-if="cols.ssh">SSH</div>
         <div v-if="cols.agent">客户端</div>
         <div></div>
       </div>
@@ -54,6 +57,9 @@
         </div>
         <div v-if="cols.net" class="net-cell">↑{{ fmtRate(n.net_sent) }}<br />↓{{ fmtRate(n.net_recv) }}</div>
         <div v-if="cols.today" class="net-cell">出↑{{ fmtBytes(n.todaySent || 0) }}<br />入↓{{ fmtBytes(n.todayRecv || 0) }}</div>
+        <div v-if="cols.month" class="net-cell month"><b>↑ {{ fmtBytes(n.monthSent||0) }}</b><br/><span>↓ {{ fmtBytes(n.monthRecv||0) }}</span></div>
+        <div v-if="cols.latency" class="latency" :class="latClass(n.latencyMs||0)">{{n.latencyMs==null?'--':n.latencyMs+' ms'}}</div>
+        <div v-if="cols.ssh" class="sshcell" :class="(n.sshFailWeek||0)?'warn':'ok'">{{(n.sshFailWeek||0)?'失败 '+n.sshFailWeek:'正常'}}</div>
         <div v-if="cols.agent" class="agent-cell">
           <span class="adot" :class="n.online ? 'on' : 'off'"></span>{{ n.online ? n.agent_ver || "—" : "离线" }}
         </div>
@@ -73,17 +79,18 @@ import { computed, reactive, ref } from "vue";
 import { NPopover } from "naive-ui";
 import { filterText, isOperator, publicMode, visibleNodes } from "../store";
 import type { NodeView } from "../types";
-import { barClass, clampPct, countryFlag, fmtBytes, fmtRate } from "../utils";
+import { barClass, clampPct, countryFlag, fmtBytes, fmtRate, latClass } from "../utils";
 
 const emit = defineEmits<{ open: [string]; edit: [NodeView] }>();
 
-const cols = reactive({ cpu: true, mem: true, disk: true, net: true, today: true, agent: true });
+const cols = reactive({ cpu: true, mem: true, disk: false, net: true, today: true, month:true, latency:true, ssh:true, agent: false });
 const toggleable = [
   { k: "cpu", l: "CPU" },
   { k: "mem", l: "内存" },
   { k: "disk", l: "磁盘" },
   { k: "net", l: "网络" },
   { k: "today", l: "今日流量" },
+	{ k:"month",l:"本月流量" },{k:"latency",l:"延迟"},{k:"ssh",l:"SSH"},
   { k: "agent", l: "客户端" },
 ] as const;
 
@@ -94,6 +101,7 @@ const gridStyle = computed(() => {
   if (cols.disk) parts.push("1.1fr");
   if (cols.net) parts.push("0.9fr");
   if (cols.today) parts.push("1.2fr");
+	if(cols.month)parts.push("1.2fr");if(cols.latency)parts.push(".7fr");if(cols.ssh)parts.push(".7fr");
   if (cols.agent) parts.push("0.8fr");
   parts.push("auto");
   return { gridTemplateColumns: parts.join(" ") };
@@ -186,14 +194,16 @@ const rows = computed(() => {
 }
 
 .table {
-  padding: 0;
+  padding: 8px;
+	background:var(--glass);border:1px solid var(--glass-border);border-radius:16px;box-shadow:var(--shadow);overflow-x:auto;
 }
 .row {
   display: grid;
   align-items: center;
   gap: 18px;
   padding: 16px 18px;
-  border-radius: 8px;
+  border-radius: 12px;
+	min-width:1180px;
   font-size: 13px;
   color: var(--text);
 }
@@ -204,8 +214,10 @@ const rows = computed(() => {
   cursor: pointer;
 }
 .row:not(.head):hover {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
+  background: color-mix(in srgb, var(--ca) 8%, transparent);transform:translateX(2px);
 }
+.latency{font-weight:700}.sshcell{font-size:11px;font-weight:700;padding:4px 8px;border-radius:9px;text-align:center}.sshcell.ok{color:#22c55e;background:rgba(34,197,94,.1)}.sshcell.warn{color:#ef4444;background:rgba(239,68,68,.1)}.month b{color:#22c55e}.month span{color:#38bdf8}
+.t-bg{color:#22c55e}.t-by{color:#eab308}.t-br{color:#ef4444}
 .row.head {
   font-size: 12px;
   color: var(--text-muted);

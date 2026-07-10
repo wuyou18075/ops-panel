@@ -1,6 +1,5 @@
 <template>
-  <NDrawer :show="show" @update:show="emit('update:show', $event)" :width="drawerWidth" placement="right">
-    <NDrawerContent :native-scrollbar="false" closable>
+  <NModal :show="show" @update:show="emit('update:show', $event)" preset="card" style="width:820px;max-width:94vw" class="detail-modal">
       <template #header>
         <div class="dh" v-if="node">
           <span class="flag">{{ countryFlag(node.prefs.country_code) }}</span>
@@ -12,7 +11,7 @@
         </div>
       </template>
 
-      <div v-if="node" class="body">
+      <div v-if="node" class="body" style="max-height:76vh;overflow:auto;padding-right:8px">
         <!-- 元数据 -->
         <div class="meta">
           <div class="mi"><span>分组</span><b>{{ node.prefs.group || "默认分组" }}</b></div>
@@ -24,6 +23,8 @@
           <div class="mi"><span>规格</span><b>{{ node.cpu_count || 0 }}核 · {{ fmtCap(node.mem_total) }} · {{ fmtCap(node.disk_total) }}</b></div>
           <div class="mi"><span>负载</span><b>{{ loadStr }}</b></div>
         </div>
+
+        <div class="section"><div class="stitle">三网延迟</div><div class="latency-grid"><div v-for="m in nodeMonitors" :key="m.id" class="latency-card"><span>{{m.name}}</span><b :class="m.up?'ok':'fail'">{{m.up?m.latency_ms.toFixed(0)+' ms':'超时'}}</b><small>{{m.target}} · {{m.type.toUpperCase()}}</small></div><div v-if="!nodeMonitors.length" class="muted">该节点未绑定延迟探测</div></div></div>
 
         <!-- 流量 -->
         <div class="section" v-if="node.quota || node.today != null">
@@ -68,16 +69,15 @@
         <div class="sshdetail"><div v-for="(l,i) in filteredSSH" :key="i" class="sshrow"><span :class="l.success?'ok':'fail'">{{l.success?'成功':'失败'}}</span><span class="u">{{l.user}}</span><span>{{l.ip}}</span><span>{{l.location||'-'}}</span></div><div v-if="!filteredSSH.length" class="muted sshempty">没有匹配记录</div></div>
         <template #footer><div class="sshfooter"><NButton tertiary @click="resetFails">重置失败计数</NButton><NButton type="error" tertiary @click="clearSSH">清空记录</NButton><div style="flex:1"></div><NButton @click="showSSHDetail=false">关闭</NButton></div></template>
       </NModal>
-    </NDrawerContent>
-  </NDrawer>
+  </NModal>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { NButton, NDrawer, NDrawerContent, NInput, NModal, NSelect, useMessage } from "naive-ui";
+import { NButton, NInput, NModal, NSelect, useMessage } from "naive-ui";
 import Sparkline from "./Sparkline.vue";
 import { Api } from "../api";
-import { isOperator, nodeById, publicMode } from "../store";
+import { isOperator, monitors, nodeById, publicMode } from "../store";
 import type { HistPoint, NodeView, SSHLog } from "../types";
 import { barClass, clampPct, countryFlag, expiryLabel, fmtBytes, fmtCap, fmtRate, fmtUptime, priceLabel } from "../utils";
 
@@ -93,8 +93,8 @@ const filteredSSH=computed(()=>sshLogs.value.filter(x=>(sshFilter.value==="all"|
 const message = useMessage();
 let timer: number | undefined;
 
-const drawerWidth = computed(() => Math.min(560, window.innerWidth - 20));
 const node = computed<NodeView | undefined>(() => nodeById(props.nodeId));
+const nodeMonitors=computed(()=>monitors.value.filter(m=>m.agent_id===props.nodeId&&m.template_id));
 
 const series = computed(() => ({
   cpu: hist.value.map((h) => h.cpu),
@@ -186,6 +186,7 @@ watch(
   gap: 8px;
   width: 100%;
 }
+.latency-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.latency-card{padding:14px;border-radius:14px;background:var(--glass);border:1px solid var(--color-line);display:flex;flex-direction:column;gap:5px}.latency-card span{font-weight:700;color:var(--ct)}.latency-card b{font-size:20px}.latency-card small{color:var(--text-muted);font-size:10px}
 .dh .flag {
   font-size: 18px;
 }

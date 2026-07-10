@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -156,8 +158,37 @@ func connectAndServe() error {
 			}
 			fmt.Printf("[Agent] 收到已签名的指令: %s\n", msg.Data)
 			go executeCommand(conn, &writeMutex, agentID, msg.Data)
+		case "process_snapshot":
+			id, _ := strconv.ParseInt(msg.Data, 10, 64)
+			go sendProcessSnapshot(conn, &writeMutex, agentID, id)
 		}
 	}
+}
+
+func sendProcessSnapshot(conn *websocket.Conn, wm *sync.Mutex, agentID string, recordID int64) {
+	out, _ := exec.Command("ps", "-eo", "pid,comm,%cpu,%mem", "--no-headers").Output()
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	sort.Slice(lines, func(i, j int) bool {
+		fi := strings.Fields(lines[i])
+		fj := strings.Fields(lines[j])
+		if len(fi) < 4 || len(fj) < 4 {
+			return false
+		}
+		ai, _ := strconv.ParseFloat(fi[2], 64)
+		am, _ := strconv.ParseFloat(fi[3], 64)
+		bi, _ := strconv.ParseFloat(fj[2], 64)
+		bm, _ := strconv.ParseFloat(fj[3], 64)
+		return ai+am > bi+bm
+	})
+	if len(lines) > 5 {
+		lines = lines[:5]
+	}
+	p := struct {
+		RecordID int64  `json:"record_id"`
+		Output   string `json:"output"`
+	}{recordID, strings.Join(lines, "\n")}
+	b, _ := json.Marshal(p)
+	writeJSON(conn, wm, Message{Type: "process_snapshot", AgentID: agentID, Data: string(b)})
 }
 
 func agentID() string {

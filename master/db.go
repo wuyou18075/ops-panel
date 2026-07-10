@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS ssh_login     (id INTEGER PRIMARY KEY AUTOINCREMENT, 
 CREATE INDEX IF NOT EXISTS idx_ssh_login_agent_ts ON ssh_login(agent_id, ts);
 CREATE TABLE IF NOT EXISTS ssh_fail_reset (agent_id TEXT PRIMARY KEY, reset_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS system_settings (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS alert_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, agent_id TEXT, kind TEXT, title TEXT, detail TEXT);
 `
 
 // openDB 打开（或创建）SQLite 库并建表。
