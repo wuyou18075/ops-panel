@@ -83,6 +83,9 @@ func main() {
 		log.Fatal("打开数据库失败:", err)
 	}
 	migrateFromJSON(".")
+	if err := loadTrafficFromDB(); err != nil {
+		log.Println("[警告] 加载流量历史失败:", err)
+	}
 
 	if err := loadAgents(agentsFile); err != nil {
 		log.Println("[警告] 加载 agent 凭证失败:", err)
@@ -100,6 +103,7 @@ func main() {
 
 	registerRoutes()
 	go trafficAlertLoop()
+	go persistTrafficLoop()
 
 	totpEnabled := os.Getenv("OPERATOR_TOTP_SECRET") != ""
 	fmt.Println()
@@ -487,11 +491,14 @@ type TrafficStats struct {
 	AgentID   string `json:"agent_id"`
 	Group     string `json:"group"`
 	Name      string `json:"name"`
-	Today     int64  `json:"today"`      // 今日字节
-	ThisMonth int64  `json:"this_month"` // 本自然月字节
-	CycleUsed int64  `json:"cycle_used"` // 本计费周期已用（有重置日时）
-	Quota     int64  `json:"quota"`      // 配额字节，0=不限
-	ResetDay  int    `json:"reset_day"`
+	Today     int64  `json:"today"`       // 今日合计字节
+	TodaySent int64  `json:"today_sent"`  // 今日出站（上行）
+	TodayRecv int64  `json:"today_recv"`  // 今日入站（下行）
+	ThisMonth int64  `json:"this_month"`  // 本自然月合计字节
+	MonthSent int64  `json:"month_sent"`  // 本月出站
+	MonthRecv int64  `json:"month_recv"`  // 本月入站
+	CycleUsed int64  `json:"cycle_used"`  // = 本自然月合计（保留字段名兼容前端）
+	Quota     int64  `json:"quota"`       // 配额字节，0=不限
 }
 
 var (
@@ -522,18 +529,6 @@ func RecordTraffic(agentID string, sentRate, recvRate float64) {
 	}
 }
 
-// cycleStartDate 计算按 resetDay 划分的当前计费周期起始日。
-func cycleStartDate(now time.Time, resetDay int) time.Time {
-	if resetDay < 1 { resetDay = 1 }
-	if resetDay > 28 { resetDay = 28 } // 夹到 28 避免月份天数不足
-	y, mth, d := now.Date()
-	if d >= resetDay {
-		return time.Date(y, mth, resetDay, 0, 0, 0, 0, now.Location())
-	}
-	prev := time.Date(y, mth, 1, 0, 0, 0, 0, now.Location()).AddDate(0, -1, 0)
-	return time.Date(prev.Year(), prev.Month(), resetDay, 0, 0, 0, 0, now.Location())
-}
-
 func trafficStatsSnapshot() []*TrafficStats {
 	agentsMu.RLock()
 	recs := make([]*AgentRecord, 0, len(agents))
@@ -548,23 +543,17 @@ func trafficStatsSnapshot() []*TrafficStats {
 	out := make([]*TrafficStats, 0, len(recs))
 	for _, rec := range recs {
 		id := rec.AgentID
-		var todayB, monthB, cycleB int64
-		cycleStart := ""
-		if rec.Prefs.TrafficResetDay > 0 {
-			cycleStart = cycleStartDate(now, rec.Prefs.TrafficResetDay).Format("2006-01-02")
-		}
+		var ts, tr, ms, mr int64
 		for k, d := range traffic {
 			if !strings.HasPrefix(k, id+"|") { continue }
-			total := d.Sent + d.Recv
-			if d.Date == today { todayB += total }
-			if strings.HasPrefix(d.Date, monthPrefix) { monthB += total }
-			if cycleStart != "" && d.Date >= cycleStart { cycleB += total } // YYYY-MM-DD 可字典序比较
+			if d.Date == today { ts += d.Sent; tr += d.Recv }
+			if strings.HasPrefix(d.Date, monthPrefix) { ms += d.Sent; mr += d.Recv }
 		}
-		if cycleStart == "" { cycleB = monthB } // 无重置日 → 用自然月
 		out = append(out, &TrafficStats{
 			AgentID: id, Group: rec.Prefs.Group, Name: rec.Name,
-			Today: todayB, ThisMonth: monthB, CycleUsed: cycleB,
-			Quota: rec.Prefs.TrafficQuota, ResetDay: rec.Prefs.TrafficResetDay,
+			Today: ts + tr, TodaySent: ts, TodayRecv: tr,
+			ThisMonth: ms + mr, MonthSent: ms, MonthRecv: mr,
+			CycleUsed: ms + mr, Quota: rec.Prefs.TrafficQuota,
 		})
 	}
 	return out
@@ -576,6 +565,74 @@ func handleTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(trafficStatsSnapshot())
+}
+
+// persistTrafficOnce 把内存 traffic map UPSERT 落库（关机不清空）。
+func persistTrafficOnce() error {
+	trafficMu.RLock()
+	type row struct {
+		id, date   string
+		sent, recv int64
+	}
+	rows := make([]row, 0, len(traffic))
+	for k, d := range traffic {
+		parts := strings.SplitN(k, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		rows = append(rows, row{parts[0], d.Date, d.Sent, d.Recv})
+	}
+	trafficMu.RUnlock()
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare("INSERT INTO traffic_daily(agent_id,date,sent,recv) VALUES(?,?,?,?) ON CONFLICT(agent_id,date) DO UPDATE SET sent=excluded.sent, recv=excluded.recv")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	for _, r := range rows {
+		if _, err := stmt.Exec(r.id, r.date, r.sent, r.recv); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// loadTrafficFromDB 启动时把近 40 天流量读回内存 map。
+func loadTrafficFromDB() error {
+	cutoff := time.Now().AddDate(0, 0, -40).Format("2006-01-02")
+	rows, err := db.Query("SELECT agent_id,date,sent,recv FROM traffic_daily WHERE date >= ?", cutoff)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, date string
+		var sent, recv int64
+		if err := rows.Scan(&id, &date, &sent, &recv); err != nil {
+			return err
+		}
+		traffic[id+"|"+date] = &TrafficDay{Date: date, Sent: sent, Recv: recv}
+	}
+	return rows.Err()
+}
+
+func persistTrafficLoop() {
+	for range time.Tick(60 * time.Second) {
+		if err := persistTrafficOnce(); err != nil {
+			log.Println("[流量落库]", err)
+		}
+		pruneOldTraffic()
+	}
+}
+
+func pruneOldTraffic() {
+	cutoff := time.Now().AddDate(0, 0, -40).Format("2006-01-02")
+	_, _ = db.Exec("DELETE FROM traffic_daily WHERE date < ?", cutoff)
 }
 
 // ── 流量超额告警（每周期每节点仅告警一次）──
@@ -596,14 +653,13 @@ func checkTrafficQuota() {
 	for _, s := range trafficStatsSnapshot() {
 		if s.Quota <= 0 || s.CycleUsed < s.Quota { continue }
 		cycleKey := now.Format("2006-01")
-		if s.ResetDay > 0 { cycleKey = cycleStartDate(now, s.ResetDay).Format("2006-01-02") }
 		trafficAlertMu.Lock()
 		already := trafficAlerted[s.AgentID] == cycleKey
 		if !already { trafficAlerted[s.AgentID] = cycleKey }
 		trafficAlertMu.Unlock()
 		if already { continue }
 		name := s.Name; if name == "" { name = s.AgentID }
-		sendTGAlert(fmt.Sprintf("⚠️ 流量超额：%s 本周期已用 %s / 配额 %s", name, humanBytes(s.CycleUsed), humanBytes(s.Quota)))
+		sendTGAlert(fmt.Sprintf("⚠️ 流量超额：%s 本月已用 %s / 配额 %s", name, humanBytes(s.CycleUsed), humanBytes(s.Quota)))
 	}
 }
 

@@ -30,7 +30,6 @@ type AgentPreferences struct {
 	ExpiryDate      string  `json:"expiry_date,omitempty"`       // 到期日 YYYY-MM-DD（前端算剩余天数）
 	Label           string  `json:"label,omitempty"`             // 计费标签（主用/长租/玩具…）
 	TrafficQuota    int64   `json:"traffic_quota,omitempty"`     // 流量配额（字节，0=不限）
-	TrafficResetDay int     `json:"traffic_reset_day,omitempty"` // 每月流量重置日 1-31
 	CountryCode     string  `json:"country_code,omitempty"`      // ISO alpha-2（geo-IP 或手动覆盖）
 	Favorite        bool    `json:"favorite,omitempty"`          // 收藏 ★
 	SortOrder       int     `json:"sort_order,omitempty"`        // 手动排序
