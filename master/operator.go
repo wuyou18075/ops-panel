@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 // operatorAuthorized 校验请求头里的 Bearer access_token 是否有效。
@@ -61,6 +62,11 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	// 记录登录日志（IP/地点/设备/用户名），地点解析走网络故异步
+	ip := clientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+	ua := r.UserAgent()
+	go insertPanelLogin(time.Now().Unix(), ip, lookupLocation(ip), parseDevice(ua), body.Username)
 
 	// 签发 token
 	accessToken, refreshToken, err := generateTokenSet()

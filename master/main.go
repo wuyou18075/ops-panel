@@ -156,6 +156,7 @@ func registerRoutes() {
 	http.HandleFunc(masterPath+"/api/traffic", handleTraffic)
 	http.HandleFunc(masterPath+"/api/history", handleHistory)
 	http.HandleFunc(masterPath+"/api/monitors", handleMonitors)
+	http.HandleFunc(masterPath+"/api/login-logs", handleLoginLogs)
 }
 
 // ============ Agent ============

@@ -112,3 +112,43 @@ func lookupCountry(ip string) string {
 	}
 	return strings.ToUpper(strings.TrimSpace(v.CountryCode))
 }
+
+// ── 城市级地点（登录/SSH 日志用）──
+
+var (
+	locMu    sync.Mutex
+	locCache = map[string]string{}
+)
+
+// lookupLocation 返回「国家·城市」，失败返回空；带内存缓存，私网跳过。
+func lookupLocation(ip string) string {
+	if ip == "" || isPrivateIP(ip) {
+		return ""
+	}
+	locMu.Lock()
+	if v, ok := locCache[ip]; ok {
+		locMu.Unlock()
+		return v
+	}
+	locMu.Unlock()
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://ip-api.com/json/" + ip + "?fields=status,country,city")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<12))
+	var v struct {
+		Status  string `json:"status"`
+		Country string `json:"country"`
+		City    string `json:"city"`
+	}
+	if json.Unmarshal(body, &v) != nil || v.Status != "success" {
+		return ""
+	}
+	loc := strings.TrimSpace(v.Country + "·" + v.City)
+	locMu.Lock()
+	locCache[ip] = loc
+	locMu.Unlock()
+	return loc
+}
