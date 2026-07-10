@@ -1,5 +1,5 @@
 <template>
-  <NModal :show="show" @update:show="emit('update:show', $event)" preset="card" title="编辑节点" style="width: 560px; max-width: 94vw">
+  <NModal :show="show" @update:show="emit('update:show', $event)" preset="card" title="编辑节点" class="node-edit-modal" style="width: 680px; max-width: 94vw">
     <NScrollbar style="max-height: 66vh">
       <div class="form" v-if="node">
         <div class="hint">节点 ID：<code>{{ node.id }}</code></div>
@@ -37,6 +37,9 @@
         <Field label="控制台"><NSwitch v-model:value="f.enable_console" /></Field>
         <Field label="流量监控"><NSwitch v-model:value="f.track_traffic" /></Field>
         <Field label="日报"><NSwitch v-model:value="f.daily_report" /></Field>
+
+        <div class="grp">延迟探测</div>
+        <div class="probe-list"><NCheckbox v-for="p in systemSettings.latency_templates" :key="p.id" :checked="f.latency_probe_ids?.includes(p.id)" @update:checked="toggleProbe(p.id,$event)"><b>{{p.name}}</b><small>{{p.target}}</small></NCheckbox></div>
       </div>
     </NScrollbar>
     <template #footer>
@@ -54,6 +57,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import {
   NButton,
+	NCheckbox,
   NInput,
   NInputNumber,
   NModal,
@@ -65,7 +69,7 @@ import {
 } from "naive-ui";
 import Field from "./Field.vue";
 import { Api } from "../api";
-import { groups, loadAgents } from "../store";
+import { groups, loadAgents, systemSettings } from "../store";
 import type { AgentPreferences, NodeView } from "../types";
 import { countryFlag, expiryLabel } from "../utils";
 
@@ -104,6 +108,7 @@ watch(
         track_traffic: p.track_traffic !== false,
         daily_report: !!p.daily_report,
         sort_order: p.sort_order || 0,
+		latency_probe_ids: [...(p.latency_probe_ids || [])],
       });
       quotaGB.value = p.traffic_quota ? Math.round(p.traffic_quota / GiB) : 0;
     }
@@ -130,6 +135,7 @@ async function save() {
       country_code: (f.country_code || "").trim().toUpperCase(),
       favorite: f.favorite,
       sort_order: f.sort_order || 0,
+	  latency_probe_ids: [...(f.latency_probe_ids || [])],
     };
     await Api.updateAgent(props.node.id, (f.name || "").trim(), prefs);
     await loadAgents();
@@ -142,6 +148,7 @@ async function save() {
     saving.value = false;
   }
 }
+function toggleProbe(id:string,on:boolean){const s=new Set<string>(f.latency_probe_ids||[]);on?s.add(id):s.delete(id);f.latency_probe_ids=[...s]}
 
 function doDelete() {
   if (!props.node) return;
@@ -169,7 +176,7 @@ function doDelete() {
 
 <style scoped>
 .form {
-  padding: 4px 6px;
+  padding: 8px 14px;
 }
 .hint {
   font-size: 12px;
@@ -186,6 +193,7 @@ function doDelete() {
   margin: 14px 0 8px;
   letter-spacing: 0.5px;
 }
+.probe-list{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.probe-list :deep(.n-checkbox){padding:12px;border:1px solid var(--color-line);border-radius:12px;background:var(--glass)}.probe-list b,.probe-list small{display:block}.probe-list small{font-size:10px;color:var(--text-muted);margin-top:2px}
 :deep(.field) {
   display: flex;
   align-items: center;

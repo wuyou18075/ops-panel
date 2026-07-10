@@ -29,15 +29,16 @@ type AgentPreferences struct {
 	Interval     int    `json:"interval"`
 
 	// ── 手动元数据（节点编辑表单录入）──
-	PriceAmount   float64 `json:"price_amount,omitempty"`   // 价格金额
-	PriceCurrency string  `json:"price_currency,omitempty"` // 货币：$/¥/€ 等
-	BillingCycle  string  `json:"billing_cycle,omitempty"`  // 月/年/一次性/免费
-	ExpiryDate    string  `json:"expiry_date,omitempty"`    // 到期日 YYYY-MM-DD（前端算剩余天数）
-	Label         string  `json:"label,omitempty"`          // 计费标签（主用/长租/玩具…）
-	TrafficQuota  int64   `json:"traffic_quota,omitempty"`  // 流量配额（字节，0=不限）
-	CountryCode   string  `json:"country_code,omitempty"`   // ISO alpha-2（geo-IP 或手动覆盖）
-	Favorite      bool    `json:"favorite,omitempty"`       // 收藏 ★
-	SortOrder     int     `json:"sort_order,omitempty"`     // 手动排序
+	PriceAmount     float64  `json:"price_amount,omitempty"`   // 价格金额
+	PriceCurrency   string   `json:"price_currency,omitempty"` // 货币：$/¥/€ 等
+	BillingCycle    string   `json:"billing_cycle,omitempty"`  // 月/年/一次性/免费
+	ExpiryDate      string   `json:"expiry_date,omitempty"`    // 到期日 YYYY-MM-DD（前端算剩余天数）
+	Label           string   `json:"label,omitempty"`          // 计费标签（主用/长租/玩具…）
+	TrafficQuota    int64    `json:"traffic_quota,omitempty"`  // 流量配额（字节，0=不限）
+	CountryCode     string   `json:"country_code,omitempty"`   // ISO alpha-2（geo-IP 或手动覆盖）
+	Favorite        bool     `json:"favorite,omitempty"`       // 收藏 ★
+	SortOrder       int      `json:"sort_order,omitempty"`     // 手动排序
+	LatencyProbeIDs []string `json:"latency_probe_ids,omitempty"`
 }
 
 type AgentRecord struct {
@@ -132,13 +133,14 @@ func saveAgents(_ string) error {
 }
 
 type EnrollRequest struct {
-	Name          string `json:"name"`
-	Group         string `json:"group"`
-	EnableConsole bool   `json:"enable_console"`
-	TrackTraffic  bool   `json:"track_traffic"`
-	DailyReport   bool   `json:"daily_report"`
-	Interval      int    `json:"interval"`
-	TrafficQuota  int64  `json:"traffic_quota"`
+	Name            string   `json:"name"`
+	Group           string   `json:"group"`
+	EnableConsole   bool     `json:"enable_console"`
+	TrackTraffic    bool     `json:"track_traffic"`
+	DailyReport     bool     `json:"daily_report"`
+	Interval        int      `json:"interval"`
+	TrafficQuota    int64    `json:"traffic_quota"`
+	LatencyProbeIDs []string `json:"latency_probe_ids"`
 }
 
 func enrollAgent(req EnrollRequest, masterAddr string) (*AgentRecord, string, error) {
@@ -165,6 +167,13 @@ func enrollAgent(req EnrollRequest, masterAddr string) (*AgentRecord, string, er
 	if req.TrafficQuota > 0 {
 		rec.Prefs.TrafficQuota = req.TrafficQuota
 	}
+	if req.LatencyProbeIDs == nil {
+		for _, p := range systemSettings.LatencyTemplates {
+			rec.Prefs.LatencyProbeIDs = append(rec.Prefs.LatencyProbeIDs, p.ID)
+		}
+	} else {
+		rec.Prefs.LatencyProbeIDs = append([]string(nil), req.LatencyProbeIDs...)
+	}
 	if req.Interval >= minInterval && req.Interval <= maxInterval {
 		rec.Prefs.Interval = req.Interval
 	}
@@ -173,6 +182,7 @@ func enrollAgent(req EnrollRequest, masterAddr string) (*AgentRecord, string, er
 		delete(agents, rec.AgentID)
 		return nil, "", err
 	}
+	syncLatencyMonitors(rec.AgentID, rec.Prefs.LatencyProbeIDs)
 	return rec, buildInstallCmd(rec, masterAddr), nil
 }
 
@@ -395,7 +405,11 @@ func UpdateAgentMeta(agentID, name string, prefs AgentPreferences) error {
 	}
 	rec.Name = name
 	rec.Prefs = prefs
-	return saveAgents(agentsFile)
+	if err := saveAgents(agentsFile); err != nil {
+		return err
+	}
+	go syncLatencyMonitors(agentID, prefs.LatencyProbeIDs)
+	return nil
 }
 
 func AgentList() []*AgentRecord {

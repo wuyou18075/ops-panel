@@ -16,6 +16,7 @@ export interface AgentPreferences {
   country_code?: string; // ISO alpha-2
   favorite?: boolean;
   sort_order?: number;
+	latency_probe_ids?: string[];
 }
 
 export interface AgentRecord {
@@ -93,7 +94,10 @@ export interface Monitor {
   target: string;
   interval: number;
   agent_id: string;
+	template_id?: string;
 }
+
+export interface SystemSettings { probe_interval:number; probe_type:string; latency_templates:{id:string;name:string;target:string}[] }
 
 export interface ProbeResult {
   monitor_id: string;
@@ -135,5 +139,5 @@ export interface SSHLog {
   success: boolean;
 }
 
-export type ThemeKey = "dark" | "green" | "gray" | "sepia" | "purple";
+export type ThemeKey = "dark" | "glass" | "white" | "green" | "sepia" | "purple" | "ocean" | "rose" | "slate" | "amber" | "cyan";
 export type ViewMode = "cards" | "table";

@@ -14,12 +14,13 @@ import (
 // agent 定时探测并上报 probe_result → master 存最新值 + 短历史 → 前端「服务监控」页。
 
 type Monitor struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Type     string `json:"type"`     // tcp | http | icmp
-	Target   string `json:"target"`   // tcp: host:port · http: url · icmp: host
-	Interval int    `json:"interval"` // 探测间隔（秒）
-	AgentID  string `json:"agent_id"` // 由哪个节点执行探测（探测视角）
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`     // tcp | http | icmp
+	Target     string `json:"target"`   // tcp: host:port · http: url · icmp: host
+	Interval   int    `json:"interval"` // 探测间隔（秒）
+	AgentID    string `json:"agent_id"` // 由哪个节点执行探测（探测视角）
+	TemplateID string `json:"template_id,omitempty"`
 }
 
 type ProbeResult struct {
@@ -44,6 +45,41 @@ var (
 	monitors    = map[string]*Monitor{}
 	probeStates = map[string]*probeState{}
 )
+
+func syncLatencyMonitors(agentID string, enabled []string) {
+	wanted := map[string]bool{}
+	for _, id := range enabled {
+		wanted[id] = true
+	}
+	monitorsMu.Lock()
+	for id, m := range monitors {
+		if m.AgentID == agentID && m.TemplateID != "" && !wanted[m.TemplateID] {
+			delete(monitors, id)
+			delete(probeStates, id)
+		}
+	}
+	for _, tpl := range systemSettings.LatencyTemplates {
+		if wanted[tpl.ID] {
+			id := agentID + "-" + tpl.ID
+			monitors[id] = &Monitor{ID: id, Name: tpl.Name, Type: systemSettings.ProbeType, Target: tpl.Target, Interval: systemSettings.ProbeInterval, AgentID: agentID, TemplateID: tpl.ID}
+		}
+	}
+	_ = saveMonitors(monitorsFile)
+	monitorsMu.Unlock()
+	pushMonitorConfig(agentID)
+}
+
+func syncAllLatencyMonitors() {
+	agentsMu.RLock()
+	list := make([]*AgentRecord, 0, len(agents))
+	for _, a := range agents {
+		list = append(list, a)
+	}
+	agentsMu.RUnlock()
+	for _, a := range list {
+		syncLatencyMonitors(a.AgentID, a.Prefs.LatencyProbeIDs)
+	}
+}
 
 // ── 持久化 ──
 
@@ -97,7 +133,7 @@ type MonitorView struct {
 	*Monitor
 	Up        bool          `json:"up"`
 	LatencyMs float64       `json:"latency_ms"`
-	Uptime    float64       `json:"uptime"`   // 最近窗口可用率 %
+	Uptime    float64       `json:"uptime"` // 最近窗口可用率 %
 	LastTS    int64         `json:"last_ts"`
 	History   []ProbeResult `json:"history"`
 }

@@ -46,15 +46,6 @@
           <button :class="{ on: viewMode === 'table' }" @click="viewMode = 'table'">表格</button>
         </div>
 
-        <!-- 主题下拉 -->
-        <NSelect
-          :value="themeKey"
-          :options="THEMES.map((t) => ({ label: t.label, value: t.key }))"
-          size="small"
-          style="width: 120px"
-          @update:value="applyTheme"
-        />
-
         <NTag :type="wsConnected ? 'success' : 'error'" size="small" round>{{ wsConnected ? "已连接" : "重连中" }}</NTag>
 
         <template v-if="!publicMode">
@@ -126,17 +117,20 @@
           </div>
         </template>
 
-        <!-- ══ 告警策略 ══ -->
+        <!-- ══ 系统配置 ══ -->
         <template v-else-if="page === 'alerts' && !publicMode">
-          <div class="alertcard">
-            <div class="ltitle" style="margin-bottom: 14px">告警策略</div>
+          <div class="settings-stack">
+          <div class="alertcard"><div class="ltitle" style="margin-bottom:14px">告警策略</div>
             <div class="arow"><span>启用告警</span><NSwitch v-model:value="alertCfg.enabled" /></div>
             <div v-for="a in alertFields" :key="a.k" class="arow">
               <span>{{ a.l }}</span>
               <NInputNumber v-model:value="(alertCfg as any)[a.k]" :min="1" :max="a.k === 'offline_minutes' ? 60 : 100" style="width: 130px" />
               <span class="unit">{{ a.u }}</span>
             </div>
-            <NButton type="primary" :loading="savingAlert" @click="saveAlerts" style="margin-top: 10px">保存</NButton>
+          </div>
+          <div class="alertcard"><div class="ltitle">延迟测试</div><p class="sethint">节点可单独选择绑定哪些线路，模板 ID 隐藏并保持稳定。</p><div class="arow"><span>探测间隔</span><NInputNumber v-model:value="systemSettings.probe_interval" :min="5" :max="3600" style="width:130px"/><span class="unit">秒</span></div><div class="arow"><span>探测方式</span><NSelect v-model:value="systemSettings.probe_type" :options="probeTypeOptions" style="width:180px"/></div><div class="template-grid"><div v-for="p in systemSettings.latency_templates" :key="p.id" class="template-card"><NInput v-model:value="p.name" placeholder="名称"/><NInput v-model:value="p.target" placeholder="IP / 地址"/><small>ID · {{p.id}}</small></div></div></div>
+          <div class="alertcard"><div class="ltitle">主题配色</div><div class="theme-grid"><button v-for="t in THEMES" :key="t.key" :class="{on:themeKey===t.key}" @click="applyTheme(t.key)"><i :style="{background:t.dot}"></i><span>{{t.label}}</span></button></div></div>
+          <NButton type="primary" size="large" :loading="savingAlert" @click="saveSystemConfig">保存系统配置</NButton>
           </div>
         </template>
 
@@ -165,6 +159,7 @@
           <NCheckbox v-model:checked="enrollTraffic">流量监控</NCheckbox>
           <NCheckbox v-model:checked="enrollReport">日报</NCheckbox>
         </div>
+        <div class="enroll-probes"><div class="ephead"><span>默认延迟探测</span><button @click="enrollProbeIds=[]">一键去掉</button></div><NCheckbox v-for="p in systemSettings.latency_templates" :key="p.id" :checked="enrollProbeIds.includes(p.id)" @update:checked="toggleEnrollProbe(p.id,$event)">{{p.name}} <small>{{p.target}}</small></NCheckbox></div>
         <div class="erow"><span>刷新频率</span><NInputNumber v-model:value="enrollInterval" :min="1" :max="60" style="width: 100px" /><span class="unit">秒</span></div>
         <div class="erow">
           <span>月流量额度</span>
@@ -242,6 +237,7 @@ import {
   selectedGroup,
   sendCommand,
   startPolling,
+	systemSettings,
   terminalLogs,
   totalCount,
   visibleNodes,
@@ -261,7 +257,7 @@ const navPages = computed(() => {
   ];
   if (!publicMode) {
     base.push({ k: "terminal", l: "命令终端", i: "⌘" });
-    base.push({ k: "alerts", l: "告警策略", i: "!" });
+    base.push({ k: "alerts", l: "系统配置", i: "⚙" });
     base.push({ k: "loginlogs", l: "登录日志", i: "≡" });
   }
   return base;
@@ -354,6 +350,7 @@ const enrollQuota = ref(1000);
 const enrollQuotaUnit = ref("GB");
 const quotaUnitOptions = ["MB", "GB", "T"].map((v) => ({ label: v, value: v }));
 const enrollCommand = ref("");
+const enrollProbeIds=ref(["hefei-mobile","hefei-unicom","hefei-telecom"]);
 const enrolling = ref(false);
 const groupOptions = computed(() => groups.value.map((g) => ({ label: g, value: g })));
 const consoleNodes = computed(() => nodeViews.value.filter((n) => n.prefs.enable_console));
@@ -363,6 +360,7 @@ function openEnroll() {
     showLogin.value = true;
     return;
   }
+	enrollProbeIds.value = systemSettings.value.latency_templates.map((p) => p.id);
   showEnroll.value = true;
 }
 async function doEnroll() {
@@ -379,7 +377,8 @@ async function doEnroll() {
       track_traffic: enrollTraffic.value,
       daily_report: enrollReport.value,
       interval: enrollInterval.value,
-	  traffic_quota: Math.round(enrollQuota.value * ({ MB: 1024 ** 2, GB: 1024 ** 3, T: 1024 ** 4 }[enrollQuotaUnit.value] || 1024 ** 3)),
+      traffic_quota: Math.round(enrollQuota.value * ({ MB: 1024 ** 2, GB: 1024 ** 3, T: 1024 ** 4 }[enrollQuotaUnit.value] || 1024 ** 3)),
+	  latency_probe_ids: enrollProbeIds.value,
     });
     enrollCommand.value = d.install_cmd;
     message.success("安装命令已生成，点击下方复制");
@@ -389,6 +388,7 @@ async function doEnroll() {
     enrolling.value = false;
   }
 }
+function toggleEnrollProbe(id:string,on:boolean){const s=new Set(enrollProbeIds.value);on?s.add(id):s.delete(id);enrollProbeIds.value=[...s]}
 function resetEnroll() {
   showEnroll.value = false;
   enrollCommand.value = "";
@@ -461,6 +461,7 @@ const alertFields = [
   { k: "disk_percent", l: "磁盘阈值", u: "%" },
   { k: "offline_minutes", l: "离线告警", u: "分钟" },
 ];
+const probeTypeOptions=[{label:"TCP 连接",value:"tcp"},{label:"HTTP 连接",value:"http"},{label:"ICMP Ping",value:"icmp"}];
 async function saveAlerts() {
   savingAlert.value = true;
   try {
@@ -472,6 +473,7 @@ async function saveAlerts() {
     savingAlert.value = false;
   }
 }
+async function saveSystemConfig(){savingAlert.value=true;try{await Promise.all([Api.saveAlerts(alertCfg.value),Api.saveSettings(systemSettings.value)]);message.success("系统配置已保存")}catch(e:any){message.error(e?.message||"保存失败")}finally{savingAlert.value=false}}
 
 onMounted(() => {
   applyTheme(themeKey.value);
@@ -484,6 +486,8 @@ onMounted(() => {
   display: flex;
   min-height: 100vh;
 }
+.enroll-probes{padding:12px;border:1px solid var(--color-line);border-radius:12px;background:var(--glass);display:flex;gap:12px;flex-wrap:wrap}.ephead{width:100%;display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted)}.ephead button{border:0;background:none;color:var(--ca);cursor:pointer}.enroll-probes small{color:var(--text-muted)}
+.settings-stack{display:flex;flex-direction:column;gap:16px;max-width:960px}.sethint{font-size:12px;color:var(--text-muted)}.template-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}.template-card{display:flex;flex-direction:column;gap:8px;padding:14px;border-radius:14px;background:var(--glass);border:1px solid var(--color-line)}.template-card small{color:var(--text-muted)}.theme-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}.theme-grid button{display:flex;align-items:center;gap:9px;padding:12px;border-radius:12px;border:1px solid var(--color-line);background:var(--glass);color:var(--text);cursor:pointer}.theme-grid button.on{border-color:var(--ca);box-shadow:0 0 0 2px color-mix(in srgb,var(--ca) 20%,transparent)}.theme-grid i{width:18px;height:18px;border-radius:50%;box-shadow:0 0 0 4px color-mix(in srgb,var(--text) 7%,transparent)}
 
 /* 侧栏 */
 .side {

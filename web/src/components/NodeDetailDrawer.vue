@@ -38,17 +38,10 @@
           <div class="stitle sshhead">
             <span>SSH 登录<span class="muted" v-if="(node.sshFailWeek || 0) > 0"> · 本周失败 {{ node.sshFailWeek }} 次</span></span>
             <span class="sshacts">
-              <button class="lnk" @click="resetFails">重置失败</button>
-              <button class="lnk" @click="clearSSH">清空</button>
+              <button class="lnk" @click="showSSHDetail = true">查看详情</button>
             </span>
           </div>
-          <div v-if="sshLogs.length === 0" class="muted sshempty">暂无 SSH 登录记录</div>
-          <div v-for="(l, i) in sshLogs.slice(0, 50)" :key="i" class="sshrow">
-            <span :class="l.success ? 'ok' : 'fail'">{{ l.success ? "成功" : "失败" }}</span>
-            <span class="u">{{ l.user }}</span>
-            <span class="ip">{{ l.ip }}</span>
-            <span class="loc">{{ l.location || "-" }}</span>
-          </div>
+          <div class="ssh-summary"><div><b class="ok">{{ sshSuccess }}</b><span>成功</span></div><div><b class="fail">{{ sshFailed }}</b><span>失败</span></div></div>
         </div>
 
         <!-- 当前指标 -->
@@ -70,13 +63,18 @@
           <div class="chart"><div class="ch"><span>↓ 下行</span><b>{{ fmtRate(series.down[series.down.length - 1] || 0) }}</b></div><Sparkline :values="series.down" color="#06b6d4" :height="40" /></div>
         </div>
       </div>
+      <NModal v-model:show="showSSHDetail" preset="card" title="SSH 登录详情" style="width:760px;max-width:94vw">
+        <div class="sshfilters"><NSelect v-model:value="sshFilter" :options="sshFilterOptions" style="width:130px"/><NInput v-model:value="sshQuery" clearable placeholder="搜索 IP"/></div>
+        <div class="sshdetail"><div v-for="(l,i) in filteredSSH" :key="i" class="sshrow"><span :class="l.success?'ok':'fail'">{{l.success?'成功':'失败'}}</span><span class="u">{{l.user}}</span><span>{{l.ip}}</span><span>{{l.location||'-'}}</span></div><div v-if="!filteredSSH.length" class="muted sshempty">没有匹配记录</div></div>
+        <template #footer><div class="sshfooter"><NButton tertiary @click="resetFails">重置失败计数</NButton><NButton type="error" tertiary @click="clearSSH">清空记录</NButton><div style="flex:1"></div><NButton @click="showSSHDetail=false">关闭</NButton></div></template>
+      </NModal>
     </NDrawerContent>
   </NDrawer>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { NButton, NDrawer, NDrawerContent, useMessage } from "naive-ui";
+import { NButton, NDrawer, NDrawerContent, NInput, NModal, NSelect, useMessage } from "naive-ui";
 import Sparkline from "./Sparkline.vue";
 import { Api } from "../api";
 import { isOperator, nodeById, publicMode } from "../store";
@@ -88,6 +86,10 @@ const emit = defineEmits<{ "update:show": [boolean]; edit: [NodeView]; console: 
 
 const hist = ref<HistPoint[]>([]);
 const sshLogs = ref<SSHLog[]>([]);
+const showSSHDetail = ref(false); const sshFilter=ref("all"); const sshQuery=ref("");
+const sshFilterOptions=[{label:"全部",value:"all"},{label:"成功",value:"success"},{label:"失败",value:"failed"}];
+const sshSuccess=computed(()=>sshLogs.value.filter(x=>x.success).length); const sshFailed=computed(()=>sshLogs.value.filter(x=>!x.success).length);
+const filteredSSH=computed(()=>sshLogs.value.filter(x=>(sshFilter.value==="all"||(sshFilter.value==="success"?x.success:!x.success))&&x.ip.toLowerCase().includes(sshQuery.value.trim().toLowerCase())));
 const message = useMessage();
 let timer: number | undefined;
 
@@ -283,6 +285,7 @@ watch(
 .sshrow .u {
   color: var(--text);
 }
+.ssh-summary{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ssh-summary>div{padding:14px;border-radius:12px;background:var(--bar-track);display:flex;align-items:baseline;gap:8px}.ssh-summary b{font-size:25px}.ssh-summary span{font-size:12px;color:var(--text-muted)}.sshfilters{display:flex;gap:10px;margin-bottom:12px}.sshdetail{max-height:55vh;overflow:auto}.sshfooter{display:flex;gap:8px;width:100%}
 
 .metric {
   margin-bottom: 8px;

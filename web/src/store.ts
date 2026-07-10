@@ -8,6 +8,7 @@ import type {
   NodeStat,
   NodeView,
   TrafficStats,
+	SystemSettings,
 } from "./types";
 
 export const publicMode =
@@ -19,6 +20,7 @@ const agents = reactive<Record<string, AgentRecord>>({}); // 元数据
 const traffic = reactive<Record<string, TrafficStats>>({}); // 流量
 const sshFails = reactive<Record<string, number>>({}); // 每节点周 SSH 失败数
 export const monitors = ref<MonitorView[]>([]);
+export const systemSettings = ref<SystemSettings>({probe_interval:30,probe_type:"icmp",latency_templates:[{id:"hefei-mobile",name:"合肥移动",target:"211.138.180.2"},{id:"hefei-unicom",name:"合肥联通",target:"218.104.78.2"},{id:"hefei-telecom",name:"合肥电信",target:"61.132.163.68"}]});
 export const groups = ref<string[]>(["默认分组"]);
 export const alertCfg = ref<AlertConfig>({
   cpu_percent: 80,
@@ -199,6 +201,7 @@ export async function login(username: string, password: string, code: string): P
   accessToken.value = d.access_token;
   refreshToken.value = d.refresh_token;
   connectOperator(d.access_token);
+	loadSettings();
   clearInterval(refreshTimer);
   refreshTimer = window.setInterval(refreshOnce, 13 * 60 * 1000);
 }
@@ -271,6 +274,7 @@ export async function loadMonitors(): Promise<void> {
     /* ignore */
   }
 }
+export async function loadSettings(): Promise<void> { try { systemSettings.value = await Api.settings(); } catch { /* ignore */ } }
 
 export function startPolling(): void {
   connectViewer();
@@ -280,6 +284,7 @@ export function startPolling(): void {
   loadTraffic();
   loadSshStats();
   loadMonitors();
+	if (!publicMode) loadSettings();
   window.setInterval(() => (nowMs.value = Date.now()), 1000);
   window.setInterval(loadTraffic, 30000);
   window.setInterval(loadSshStats, 30000);

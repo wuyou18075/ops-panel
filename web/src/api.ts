@@ -9,6 +9,7 @@ import type {
   MonitorView,
   SSHLog,
   TrafficStats,
+	SystemSettings,
 } from "./types";
 
 // 面板挂在 MASTER_PATH 前缀下（如 /panel），取路径首段
@@ -37,6 +38,8 @@ async function parse(r: Response): Promise<any> {
 }
 
 export const Api = {
+	settings(): Promise<SystemSettings> { return fetch(api("/api/settings"), { headers: authHeaders() }).then(parse); },
+	saveSettings(body: SystemSettings) { return fetch(api("/api/settings"), { method:"POST", headers:authHeaders(), body:JSON.stringify(body) }).then(parse); },
   login(username: string, password: string, code: string) {
     return fetch(api("/api/login"), {
       method: "POST",

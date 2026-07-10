@@ -33,6 +33,7 @@ export const THEMES: ThemeDef[] = [
       "--shadow": "0 4px 22px rgba(0,0,0,0.38)",
     },
   },
+  { key:"glass",label:"透明玻璃",dot:"#67e8f9",light:false,vars:{"--bg-body":"#07111f","--bg-grad":"radial-gradient(circle at 15% 10%,#164e63 0,transparent 35%),radial-gradient(circle at 85% 15%,#312e81 0,transparent 32%),#07111f","--bg-panel":"rgba(8,18,32,.72)","--glass":"rgba(255,255,255,.075)","--glass-border":"rgba(255,255,255,.16)","--color-line":"rgba(255,255,255,.12)","--ca":"#22d3ee","--ca-rgb":"34,211,238","--ct":"#f0f9ff","--text":"#d7eef7","--text-muted":"#87a9b8","--bar-track":"rgba(255,255,255,.09)","--shadow":"0 16px 45px rgba(0,0,0,.32)"}},
   {
     key: "green",
     label: "护眼绿",
@@ -55,8 +56,8 @@ export const THEMES: ThemeDef[] = [
     },
   },
   {
-    key: "gray",
-    label: "浅色灰",
+    key: "white",
+    label: "纯净白",
     dot: "#3b82f6",
     light: true,
     vars: {
@@ -117,6 +118,11 @@ export const THEMES: ThemeDef[] = [
       "--shadow": "0 4px 20px rgba(90,70,160,0.15)",
     },
   },
+  {key:"ocean",label:"深海蓝",dot:"#0ea5e9",light:false,vars:{"--bg-body":"#061827","--bg-grad":"linear-gradient(145deg,#04131f,#082f49 58%,#0c4a6e)","--bg-panel":"#082235","--glass":"rgba(8,47,73,.72)","--glass-border":"rgba(125,211,252,.14)","--color-line":"#164e63","--ca":"#38bdf8","--ca-rgb":"56,189,248","--ct":"#e0f2fe","--text":"#bae6fd","--text-muted":"#7dd3fc","--bar-track":"rgba(125,211,252,.1)","--shadow":"0 8px 30px rgba(2,132,199,.12)"}},
+  {key:"rose",label:"雾粉玫瑰",dot:"#f472b6",light:true,vars:{"--bg-body":"#fff1f5","--bg-grad":"linear-gradient(145deg,#fff7fa,#fce7f3 55%,#fbcfe8)","--bg-panel":"#fff8fb","--glass":"rgba(255,255,255,.68)","--glass-border":"rgba(255,255,255,.85)","--color-line":"rgba(190,24,93,.12)","--ca":"#db2777","--ca-rgb":"219,39,119","--ct":"#831843","--text":"#9d174d","--text-muted":"#be5b83","--bar-track":"rgba(190,24,93,.08)","--shadow":"0 8px 26px rgba(190,24,93,.11)"}},
+  {key:"slate",label:"石墨灰",dot:"#94a3b8",light:false,vars:{"--bg-body":"#111827","--bg-grad":"linear-gradient(150deg,#0f172a,#1e293b 60%,#111827)","--bg-panel":"#1e293b","--glass":"rgba(30,41,59,.76)","--glass-border":"rgba(148,163,184,.14)","--color-line":"#334155","--ca":"#94a3b8","--ca-rgb":"148,163,184","--ct":"#f8fafc","--text":"#e2e8f0","--text-muted":"#94a3b8","--bar-track":"rgba(148,163,184,.12)","--shadow":"0 8px 28px rgba(0,0,0,.3)"}},
+  {key:"amber",label:"暖阳橙",dot:"#f59e0b",light:true,vars:{"--bg-body":"#fffbeb","--bg-grad":"linear-gradient(145deg,#fffbeb,#fef3c7 58%,#fde68a)","--bg-panel":"#fffdf5","--glass":"rgba(255,255,255,.66)","--glass-border":"rgba(255,255,255,.8)","--color-line":"rgba(180,83,9,.14)","--ca":"#d97706","--ca-rgb":"217,119,6","--ct":"#78350f","--text":"#92400e","--text-muted":"#b2763d","--bar-track":"rgba(180,83,9,.09)","--shadow":"0 8px 24px rgba(180,83,9,.11)"}},
+  {key:"cyan",label:"薄荷青",dot:"#14b8a6",light:true,vars:{"--bg-body":"#ecfdf5","--bg-grad":"linear-gradient(145deg,#f0fdfa,#ccfbf1 58%,#99f6e4)","--bg-panel":"#f5fffc","--glass":"rgba(255,255,255,.66)","--glass-border":"rgba(255,255,255,.82)","--color-line":"rgba(13,148,136,.14)","--ca":"#0d9488","--ca-rgb":"13,148,136","--ct":"#134e4a","--text":"#115e59","--text-muted":"#4f8f89","--bar-track":"rgba(13,148,136,.09)","--shadow":"0 8px 24px rgba(13,148,136,.11)"}},
 ];
 
 export const themeKey = ref<ThemeKey>(

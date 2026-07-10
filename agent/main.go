@@ -400,6 +400,9 @@ func probe(ctx context.Context, m Monitor) (bool, float64) {
 }
 
 func probeTCP(target string) (bool, float64) {
+	if _, _, err := net.SplitHostPort(target); err != nil {
+		target = net.JoinHostPort(strings.Trim(target, "[]"), "80")
+	}
 	start := time.Now()
 	c, err := net.DialTimeout("tcp", target, 5*time.Second)
 	if err != nil {

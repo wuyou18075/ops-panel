@@ -65,7 +65,7 @@
         </div>
 
         <div class="ops-row">
-          <span>负载 <b>{{ loadStr(n) }}</b></span>
+          <span>延迟状态 <b>{{ n.latencyMs == null ? "等待探测" : n.latencyMs + " ms" }}</b></span>
           <span :class="(n.sshFailWeek || 0) ? 'ssh-warn' : 'ssh-ok'">SSH {{ (n.sshFailWeek || 0) ? '失败 ' + n.sshFailWeek : '正常' }}</span>
         </div>
 
@@ -118,10 +118,6 @@ function metrics(n: NodeView) {
     { k: "SWAP", p: Number(n.swap_pct ?? 0), t: n.swap_pct != null ? Number(n.swap_pct).toFixed(0) + "%" : "OFF" },
     { k: "硬盘", p: Number(n.disk ?? 0), t: Number(n.disk ?? 0).toFixed(1) + "%" },
   ];
-}
-function loadStr(n: NodeView): string {
-  if (n.load_1 == null) return "-";
-  return `${n.load_1.toFixed(2)} | ${(n.load_5 ?? 0).toFixed(2)} | ${(n.load_15 ?? 0).toFixed(2)}`;
 }
 function quotaPct(n: NodeView): number {
   if (!n.quota) return 0;

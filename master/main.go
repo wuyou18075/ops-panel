@@ -144,6 +144,7 @@ func registerRoutes() {
 	if err := loadMonitors(monitorsFile); err != nil {
 		log.Println("[警告] 加载监控配置失败:", err)
 	}
+	_ = loadSystemSettings()
 
 	distFS, err := fsSub(frontendFiles, "dist")
 	if err != nil {
@@ -168,6 +169,7 @@ func registerRoutes() {
 	http.HandleFunc(masterPath+"/api/traffic", handleTraffic)
 	http.HandleFunc(masterPath+"/api/history", handleHistory)
 	http.HandleFunc(masterPath+"/api/monitors", handleMonitors)
+	http.HandleFunc(masterPath+"/api/settings", handleSystemSettings)
 	http.HandleFunc(masterPath+"/api/login-logs", handleLoginLogs)
 	http.HandleFunc(masterPath+"/api/ssh-logs", handleSSHLogs)
 	http.HandleFunc(masterPath+"/api/ssh-stats", handleSSHStats)
@@ -687,7 +689,6 @@ func ingestTrafficSnapshot(agentID string, days []agentTrafficDay) {
 		traffic[agentID+"|"+d.Date] = &TrafficDay{Date: d.Date, Sent: d.Sent, Recv: d.Recv}
 	}
 }
-
 
 func trafficStatsSnapshot() []*TrafficStats {
 	agentsMu.RLock()
