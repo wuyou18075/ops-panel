@@ -1,6 +1,12 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+)
 
 func TestParseSSHLine(t *testing.T) {
 	cases := []struct {
@@ -25,5 +31,52 @@ func TestParseSSHLine(t *testing.T) {
 		if ev.Success != c.success || ev.User != c.user || ev.IP != c.ip || ev.Method != c.method {
 			t.Errorf("解析错 %q -> %+v", c.line, ev)
 		}
+	}
+}
+
+func TestTailSSHLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.log")
+	os.WriteFile(path, []byte("start\n"), 0o644)
+
+	old := sshPollInterval
+	sshPollInterval = 30 * time.Millisecond
+	defer func() { sshPollInterval = old }()
+
+	var mu sync.Mutex
+	var got []SSHEvent
+	stop := make(chan struct{})
+	go tailSSHLog(path, stop, func(ev SSHEvent) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	})
+
+	time.Sleep(100 * time.Millisecond) // 等 seek 到末尾
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString("Jul 10 12:00:00 h sshd[1]: Failed password for root from 9.9.9.9 port 22 ssh2\n")
+	f.Close()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(got)
+		mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	close(stop)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("应采集到 1 条事件，got %d", len(got))
+	}
+	if got[0].User != "root" || got[0].IP != "9.9.9.9" || got[0].Success {
+		t.Errorf("事件错: %+v", got[0])
+	}
+	if got[0].TS == 0 {
+		t.Errorf("TS 未设置")
 	}
 }

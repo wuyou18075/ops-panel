@@ -71,13 +71,24 @@ func indexOf(ss []string, s string) int {
 
 var sshLogPaths = []string{"/var/log/auth.log", "/var/log/secure"}
 
-// startSSHCollector tail 第一个可读日志，解析新行并上报。
-// 启动时 seek 到末尾，仅采集启动后新事件；处理日志轮转与分片行。
+// sshPollInterval 是 tail 到达文件末尾后的轮询间隔（测试可调小）。
+var sshPollInterval = 2 * time.Second
+
+// startSSHCollector tail 第一个可读日志，解析新行并经 WS 上报。
 func startSSHCollector(conn *websocket.Conn, wm *sync.Mutex, agentID string) {
 	path := firstReadable(sshLogPaths)
 	if path == "" {
 		return // 无可读日志（权限不足/文件不存在）则静默退出
 	}
+	tailSSHLog(path, nil, func(ev SSHEvent) {
+		b, _ := json.Marshal(ev)
+		writeJSON(conn, wm, Message{Type: "ssh_event", AgentID: agentID, Data: string(b)})
+	})
+}
+
+// tailSSHLog 从文件末尾 tail，解析 SSH 行并对每个事件调用 emit。
+// 启动时 seek 到末尾仅采集新事件；处理日志轮转与分片行。stop 关闭后返回（nil=永久运行）。
+func tailSSHLog(path string, stop <-chan struct{}, emit func(SSHEvent)) {
 	f, err := os.Open(path)
 	if err != nil {
 		return
@@ -87,6 +98,11 @@ func startSSHCollector(conn *websocket.Conn, wm *sync.Mutex, agentID string) {
 	reader := bufio.NewReader(f)
 	var partial strings.Builder
 	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
 		chunk, err := reader.ReadString('\n')
 		if err != nil {
 			partial.WriteString(chunk) // 累积不完整行，待下次补全
@@ -98,7 +114,11 @@ func startSSHCollector(conn *websocket.Conn, wm *sync.Mutex, agentID string) {
 					partial.Reset()
 				}
 			}
-			time.Sleep(2 * time.Second)
+			select {
+			case <-stop:
+				return
+			case <-time.After(sshPollInterval):
+			}
 			continue
 		}
 		line := strings.TrimSpace(partial.String() + chunk)
@@ -108,8 +128,7 @@ func startSSHCollector(conn *websocket.Conn, wm *sync.Mutex, agentID string) {
 			continue
 		}
 		ev.TS = time.Now().Unix()
-		b, _ := json.Marshal(ev)
-		writeJSON(conn, wm, Message{Type: "ssh_event", AgentID: agentID, Data: string(b)})
+		emit(ev)
 	}
 }
 
