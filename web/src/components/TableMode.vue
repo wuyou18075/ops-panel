@@ -2,11 +2,11 @@
   <div>
     <div class="header">
       <div>
-        <h1>All Systems</h1>
+        <h1>全部节点</h1>
         <p>实时更新 · 点击系统查看详情 · 共 {{ rows.length }} 个节点</p>
       </div>
       <div class="controls">
-        <input v-model="filterText" placeholder="Filter..." />
+        <input v-model="filterText" placeholder="筛选…" />
         <NPopover trigger="click" placement="bottom-end">
           <template #trigger>
             <button class="colbtn">列 ▾</button>
@@ -23,12 +23,12 @@
 
     <div class="table">
       <div class="row head" :style="gridStyle">
-        <div @click="sortBy('name')">System <span class="sort">{{ arrow("name") }}</span></div>
+        <div @click="sortBy('name')">系统 <span class="sort">{{ arrow("name") }}</span></div>
         <div v-if="cols.cpu" @click="sortBy('cpu')">CPU <span class="sort">{{ arrow("cpu") }}</span></div>
-        <div v-if="cols.mem" @click="sortBy('mem')">Memory <span class="sort">{{ arrow("mem") }}</span></div>
-        <div v-if="cols.disk" @click="sortBy('disk')">Disk <span class="sort">{{ arrow("disk") }}</span></div>
-        <div v-if="cols.net" @click="sortBy('net')">Net <span class="sort">{{ arrow("net") }}</span></div>
-        <div v-if="cols.agent">Agent</div>
+        <div v-if="cols.mem" @click="sortBy('mem')">内存 <span class="sort">{{ arrow("mem") }}</span></div>
+        <div v-if="cols.disk" @click="sortBy('disk')">磁盘 <span class="sort">{{ arrow("disk") }}</span></div>
+        <div v-if="cols.net" @click="sortBy('net')">网络 <span class="sort">{{ arrow("net") }}</span></div>
+        <div v-if="cols.agent">客户端</div>
         <div></div>
       </div>
 
@@ -78,10 +78,10 @@ const emit = defineEmits<{ open: [string]; edit: [NodeView] }>();
 const cols = reactive({ cpu: true, mem: true, disk: true, net: true, agent: true });
 const toggleable = [
   { k: "cpu", l: "CPU" },
-  { k: "mem", l: "Memory" },
-  { k: "disk", l: "Disk" },
-  { k: "net", l: "Net" },
-  { k: "agent", l: "Agent" },
+  { k: "mem", l: "内存" },
+  { k: "disk", l: "磁盘" },
+  { k: "net", l: "网络" },
+  { k: "agent", l: "客户端" },
 ] as const;
 
 const gridStyle = computed(() => {
@@ -187,8 +187,8 @@ const rows = computed(() => {
 .row {
   display: grid;
   align-items: center;
-  gap: 14px;
-  padding: 10px 14px;
+  gap: 18px;
+  padding: 16px 18px;
   border-radius: 8px;
   font-size: 13px;
   color: var(--text);
@@ -205,7 +205,7 @@ const rows = computed(() => {
 .row.head {
   font-size: 12px;
   color: var(--text-muted);
-  padding-top: 14px;
+  padding-top: 18px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   cursor: default;

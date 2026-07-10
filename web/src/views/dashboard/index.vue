@@ -23,7 +23,6 @@
       <div class="groups">
         <div class="ghead">
           <span>分组</span>
-          <button v-if="!publicMode && isOperator" class="gadd" @click="showAddGroup = true">+</button>
         </div>
         <div class="gi" :class="{ act: selectedGroup === '全部' }" @click="selectedGroup = '全部'">全部节点</div>
         <div v-for="g in groups" :key="g" class="gi" :class="{ act: selectedGroup === g }" @click="selectedGroup = g">{{ g }}</div>
@@ -47,18 +46,14 @@
           <button :class="{ on: viewMode === 'table' }" @click="viewMode = 'table'">表格</button>
         </div>
 
-        <!-- 主题圆点 -->
-        <div class="themes">
-          <span
-            v-for="t in THEMES"
-            :key="t.key"
-            class="tdot"
-            :class="{ sel: themeKey === t.key }"
-            :style="{ background: t.dot }"
-            :title="t.label"
-            @click="applyTheme(t.key)"
-          ></span>
-        </div>
+        <!-- 主题下拉 -->
+        <NSelect
+          :value="themeKey"
+          :options="THEMES.map((t) => ({ label: t.label, value: t.key }))"
+          size="small"
+          style="width: 120px"
+          @update:value="applyTheme"
+        />
 
         <NTag :type="wsConnected ? 'success' : 'error'" size="small" round>{{ wsConnected ? "已连接" : "重连中" }}</NTag>
 
@@ -81,7 +76,10 @@
           <div class="listwrap">
             <div class="lhead">
               <span class="ltitle">节点（{{ visibleNodes.length }}）</span>
-              <NButton v-if="!publicMode && isOperator" type="primary" size="small" @click="openEnroll">+ 添加节点</NButton>
+              <div class="lhead-actions" v-if="!publicMode && isOperator">
+                <NButton size="small" @click="showAddGroup = true">+ 添加分组</NButton>
+                <NButton type="primary" size="small" @click="openEnroll">+ 添加节点</NButton>
+              </div>
             </div>
             <CardMode v-if="viewMode === 'cards'" @open="openDetail" @fav="toggleFav" @edit="openEdit" />
             <TableMode v-else @open="openDetail" @edit="openEdit" />
@@ -541,15 +539,6 @@ onMounted(() => {
   color: var(--text-muted);
   margin-bottom: 8px;
 }
-.gadd {
-  border: none;
-  background: var(--bar-track);
-  color: var(--text);
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  cursor: pointer;
-}
 .gi {
   padding: 6px 10px;
   border-radius: 7px;
@@ -635,28 +624,6 @@ onMounted(() => {
   color: #fff;
   font-weight: 600;
 }
-.themes {
-  display: flex;
-  gap: 5px;
-}
-.tdot {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  cursor: pointer;
-  border: 2px solid transparent;
-  opacity: 0.6;
-  transition: all 0.15s;
-}
-.tdot:hover {
-  opacity: 1;
-}
-.tdot.sel {
-  border-color: var(--ct);
-  opacity: 1;
-  transform: scale(1.12);
-}
-
 .content {
   padding: 20px;
   flex: 1;
@@ -701,6 +668,10 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+.lhead-actions {
+  display: flex;
+  gap: 8px;
 }
 .ltitle {
   font-size: 17px;
