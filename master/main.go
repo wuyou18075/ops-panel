@@ -157,6 +157,9 @@ func registerRoutes() {
 	http.HandleFunc(masterPath+"/api/history", handleHistory)
 	http.HandleFunc(masterPath+"/api/monitors", handleMonitors)
 	http.HandleFunc(masterPath+"/api/login-logs", handleLoginLogs)
+	http.HandleFunc(masterPath+"/api/ssh-logs", handleSSHLogs)
+	http.HandleFunc(masterPath+"/api/ssh-stats", handleSSHStats)
+	http.HandleFunc(masterPath+"/api/ssh-fails/reset", handleSSHFailReset)
 }
 
 // ============ Agent ============
@@ -207,6 +210,17 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 			broadcastToWeb(msgBytes)
 		case "probe_result":
 			ingestProbeResult(agentID, msg.Data)
+		case "ssh_event":
+			var ev struct {
+				TS      int64  `json:"ts"`
+				IP      string `json:"ip"`
+				User    string `json:"user"`
+				Method  string `json:"method"`
+				Success bool   `json:"success"`
+			}
+			if json.Unmarshal([]byte(msg.Data), &ev) == nil {
+				insertSSHLogin(agentID, ev.TS, ev.IP, lookupLocation(ev.IP), ev.User, ev.Method, ev.Success)
+			}
 		case "log":
 			broadcastToWeb(msgBytes)
 		}

@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseDevice(t *testing.T) {
@@ -32,5 +33,26 @@ func TestPanelLogin_InsertCapClear(t *testing.T) {
 	clearPanelLogin()
 	if len(listPanelLogin()) != 0 {
 		t.Errorf("清空失败")
+	}
+}
+
+func TestSSHLogin_CapAndWeeklyFails(t *testing.T) {
+	if err := openDB(filepath.Join(t.TempDir(), "t.db")); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().Unix()
+	for i := 0; i < 210; i++ {
+		insertSSHLogin("n1", now, "1.1.1.1", "", "root", "password", false)
+	}
+	if got := len(listSSHLogin("n1")); got != 200 {
+		t.Fatalf("应裁剪 200，got %d", got)
+	}
+	if wf := weeklySSHFails("n1", time.Now()); wf < 200 {
+		t.Errorf("周失败数应≥200，got %d", wf)
+	}
+	resetSSHFails("n1", time.Now().Unix()+1) // 基线设为将来 → 计数归零
+	if wf := weeklySSHFails("n1", time.Now()); wf != 0 {
+		t.Errorf("重置后应为 0，got %d", wf)
 	}
 }
