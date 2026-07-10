@@ -118,6 +118,8 @@ func connectAndServe() error {
 		}
 	}()
 
+	go startSSHCollector(conn, &writeMutex, agentID)
+
 	for {
 		var msg Message
 		err := conn.ReadJSON(&msg)

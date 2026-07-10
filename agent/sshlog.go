@@ -1,6 +1,16 @@
 package main
 
-import "strings"
+import (
+	"bufio"
+	"encoding/json"
+	"io"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
 
 // sshlog.go —— 解析 /var/log/auth.log|secure 的 SSH 登录事件并上报 master。
 
@@ -57,4 +67,58 @@ func indexOf(ss []string, s string) int {
 		}
 	}
 	return -1
+}
+
+var sshLogPaths = []string{"/var/log/auth.log", "/var/log/secure"}
+
+// startSSHCollector tail 第一个可读日志，解析新行并上报。
+// 启动时 seek 到末尾，仅采集启动后新事件；处理日志轮转与分片行。
+func startSSHCollector(conn *websocket.Conn, wm *sync.Mutex, agentID string) {
+	path := firstReadable(sshLogPaths)
+	if path == "" {
+		return // 无可读日志（权限不足/文件不存在）则静默退出
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.Seek(0, io.SeekEnd)
+	reader := bufio.NewReader(f)
+	var partial strings.Builder
+	for {
+		chunk, err := reader.ReadString('\n')
+		if err != nil {
+			partial.WriteString(chunk) // 累积不完整行，待下次补全
+			// 轮转检测：文件被截断/替换（当前偏移 > 文件大小）则回到开头
+			if fi, e := os.Stat(path); e == nil {
+				if cur, _ := f.Seek(0, io.SeekCurrent); fi.Size() < cur {
+					f.Seek(0, io.SeekStart)
+					reader.Reset(f)
+					partial.Reset()
+				}
+			}
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		line := strings.TrimSpace(partial.String() + chunk)
+		partial.Reset()
+		ev, ok := parseSSHLine(line)
+		if !ok {
+			continue
+		}
+		ev.TS = time.Now().Unix()
+		b, _ := json.Marshal(ev)
+		writeJSON(conn, wm, Message{Type: "ssh_event", AgentID: agentID, Data: string(b)})
+	}
+}
+
+func firstReadable(paths []string) string {
+	for _, p := range paths {
+		if f, err := os.Open(p); err == nil {
+			f.Close()
+			return p
+		}
+	}
+	return ""
 }
