@@ -2,3 +2,6 @@
 master/ops-panel.db
 master/ops-panel.db-*
 *.bak
+
+# 前端依赖（不应入库）
+web/node_modules/
