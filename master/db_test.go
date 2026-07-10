@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -94,5 +95,24 @@ func TestAlertsRoundTrip(t *testing.T) {
 	}
 	if alertConfig.CPUPercent != 70 || alertConfig.DiskPercent != 88 || !alertConfig.Enabled {
 		t.Fatalf("alerts 往返错: %+v", alertConfig)
+	}
+}
+
+func TestMigrateFromJSON(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "agents.json"), []byte(`[{"agent_id":"n1","secret":"s","name":"old","prefs":{"group":"默认分组","interval":2}}]`), 0o600)
+	if err := openDB(filepath.Join(dir, "t.db")); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	agents = map[string]*AgentRecord{}
+	migrateFromJSON(dir)
+	var n int
+	db.QueryRow("SELECT count(*) FROM agents WHERE agent_id='n1'").Scan(&n)
+	if n != 1 {
+		t.Fatalf("未迁移 agents.json，count=%d", n)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agents.json.bak")); err != nil {
+		t.Errorf("未改名 .bak: %v", err)
 	}
 }

@@ -79,6 +79,11 @@ func main() {
 	if operatorPass == "" { operatorPass = genShortPassword() }
 	if masterPath == "" { masterPath = "/" + genSecret()[:16] }
 
+	if err := openDB("ops-panel.db"); err != nil {
+		log.Fatal("打开数据库失败:", err)
+	}
+	migrateFromJSON(".")
+
 	if err := loadAgents(agentsFile); err != nil {
 		log.Println("[警告] 加载 agent 凭证失败:", err)
 	}

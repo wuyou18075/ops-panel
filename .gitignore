@@ -1,0 +1,4 @@
+# 运行时数据库与配置备份
+master/ops-panel.db
+master/ops-panel.db-*
+*.bak
