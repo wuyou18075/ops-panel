@@ -2,10 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -49,34 +47,48 @@ var (
 
 // ── 持久化 ──
 
-func loadMonitors(path string) error {
-	data, err := os.ReadFile(path)
+func loadMonitors(_ string) error {
+	rows, err := db.Query("SELECT data FROM monitors")
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var dj string
+		if err := rows.Scan(&dj); err != nil {
+			return err
 		}
-		return err
+		var m Monitor
+		if json.Unmarshal([]byte(dj), &m) == nil {
+			monitors[m.ID] = &m
+		}
 	}
-	var list []*Monitor
-	if err := json.Unmarshal(data, &list); err != nil {
-		return err
-	}
-	for _, m := range list {
-		monitors[m.ID] = m
-	}
-	return nil
+	return rows.Err()
 }
 
-func saveMonitors(path string) error {
-	list := make([]*Monitor, 0, len(monitors))
-	for _, m := range monitors {
-		list = append(list, m)
-	}
-	data, err := json.MarshalIndent(list, "", "  ")
+func saveMonitors(_ string) error {
+	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	if _, err := tx.Exec("DELETE FROM monitors"); err != nil {
+		tx.Rollback()
+		return err
+	}
+	stmt, err := tx.Prepare("INSERT INTO monitors(id,data) VALUES(?,?)")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	for _, m := range monitors {
+		dj, _ := json.Marshal(m)
+		if _, err := stmt.Exec(m.ID, string(dj)); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ── 对外视图 ──

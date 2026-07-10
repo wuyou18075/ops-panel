@@ -6,9 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -179,15 +177,48 @@ func sanitizeAgentID(id string) string {
 const groupsFile = "groups.json"
 var (groupsMu sync.RWMutex; groupsList = []string{"默认分组"})
 
-func loadGroups(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil { if errors.Is(err, os.ErrNotExist) { return nil }; return err }
-	var list []string; json.Unmarshal(data, &list); groupsList = list; return nil
+func loadGroups(_ string) error {
+	rows, err := db.Query("SELECT name FROM agent_groups ORDER BY ord")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return err
+		}
+		out = append(out, n)
+	}
+	if len(out) > 0 {
+		groupsList = out
+	}
+	return rows.Err()
 }
 
-func saveGroups(path string) error {
-	data, err := json.MarshalIndent(groupsList, "", "  "); if err != nil { return err }
-	return os.WriteFile(path, data, 0o600)
+func saveGroups(_ string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM agent_groups"); err != nil {
+		tx.Rollback()
+		return err
+	}
+	stmt, err := tx.Prepare("INSERT INTO agent_groups(name,ord) VALUES(?,?)")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	for i, n := range groupsList {
+		if _, err := stmt.Exec(n, i); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func AddGroup(name string) error {

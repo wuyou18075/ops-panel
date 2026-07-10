@@ -1,9 +1,9 @@
 package main
 
 import (
+	"database/sql"
 	"embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -431,15 +431,25 @@ type AlertConfig struct {
 	Enabled        bool `json:"enabled"`
 }
 
-func loadAlerts(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil { if errors.Is(err, os.ErrNotExist) { return nil }; return err }
-	return json.Unmarshal(data, &alertConfig)
+func loadAlerts(_ string) error {
+	var dj string
+	err := db.QueryRow("SELECT data FROM alerts WHERE id=1").Scan(&dj)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(dj), &alertConfig)
 }
 
-func saveAlerts(path string) error {
-	data, err := json.MarshalIndent(alertConfig, "", "  ")
-	if err != nil { return err }; return os.WriteFile(path, data, 0o600)
+func saveAlerts(_ string) error {
+	dj, err := json.Marshal(alertConfig)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec("INSERT INTO alerts(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data", string(dj))
+	return err
 }
 
 func handleAlerts(w http.ResponseWriter, r *http.Request) {
