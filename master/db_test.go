@@ -17,3 +17,27 @@ func TestOpenDB_CreatesSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentsRoundTrip(t *testing.T) {
+	if err := openDB(filepath.Join(t.TempDir(), "t.db")); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	agents = map[string]*AgentRecord{}
+	rec := NewAgentRecord()
+	rec.AgentID = "node-x"
+	rec.Name = "n1"
+	rec.Prefs.Group = "g1"
+	agents[rec.AgentID] = rec
+	if err := saveAgents(""); err != nil {
+		t.Fatal(err)
+	}
+	agents = map[string]*AgentRecord{}
+	if err := loadAgents(""); err != nil {
+		t.Fatal(err)
+	}
+	got := agents["node-x"]
+	if got == nil || got.Name != "n1" || got.Prefs.Group != "g1" {
+		t.Fatalf("往返丢失: %+v", got)
+	}
+}

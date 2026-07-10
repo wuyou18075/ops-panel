@@ -68,23 +68,53 @@ func genShortPassword() string {
 	for i := range b { b[i] = chars[int(b[i])%len(chars)] }; return string(b)
 }
 
-func loadAgents(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil { if errors.Is(err, os.ErrNotExist) { return nil }; return err }
-	var list []*AgentRecord
-	if err := json.Unmarshal(data, &list); err != nil { return err }
-	for _, a := range list {
-		if a.Prefs.Interval < minInterval || a.Prefs.Interval > maxInterval { a.Prefs.Interval = 5 }
-		if a.LastStat == nil { a.LastStat = make(map[string]any) }; agents[a.AgentID] = a
+// loadAgents 从 SQLite 读入内存 map（path 参数保留以兼容调用点）。
+func loadAgents(_ string) error {
+	rows, err := db.Query("SELECT agent_id, secret, name, agent_ver, prefs FROM agents")
+	if err != nil {
+		return err
 	}
-	return nil
+	defer rows.Close()
+	for rows.Next() {
+		var a AgentRecord
+		var prefsJSON string
+		if err := rows.Scan(&a.AgentID, &a.Secret, &a.Name, &a.AgentVer, &prefsJSON); err != nil {
+			return err
+		}
+		_ = json.Unmarshal([]byte(prefsJSON), &a.Prefs)
+		if a.Prefs.Interval < minInterval || a.Prefs.Interval > maxInterval {
+			a.Prefs.Interval = 5
+		}
+		a.LastStat = make(map[string]any)
+		agents[a.AgentID] = &a
+	}
+	return rows.Err()
 }
 
-func saveAgents(path string) error {
-	list := make([]*AgentRecord, 0, len(agents))
-	for _, a := range agents { cp := *a; cp.LastStat = nil; cp.Connected = false; list = append(list, &cp) }
-	data, err := json.MarshalIndent(list, "", "  ")
-	if err != nil { return err }; return os.WriteFile(path, data, 0o600)
+// saveAgents 全量写穿 SQLite（agent 数量小；先清后插以让删除生效）。
+func saveAgents(_ string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM agents"); err != nil {
+		tx.Rollback()
+		return err
+	}
+	stmt, err := tx.Prepare("INSERT INTO agents(agent_id,secret,name,agent_ver,prefs) VALUES(?,?,?,?,?)")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	for _, a := range agents {
+		pj, _ := json.Marshal(a.Prefs)
+		if _, err := stmt.Exec(a.AgentID, a.Secret, a.Name, a.AgentVer, string(pj)); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 type EnrollRequest struct {
