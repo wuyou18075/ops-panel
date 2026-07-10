@@ -6,6 +6,8 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -33,6 +35,9 @@ type Message struct {
 const defaultMasterURL = "127.0.0.1:8080"
 const defaultInterval = 2 * time.Second
 
+// AgentVersion 上报给 master，用于表格「Agent」列展示
+const AgentVersion = "1.0.0"
+
 var dangerousKeywords = []string{
 	"rm -rf /", "mkfs", "dd if=", "> /dev/sda", ":(){:|:&};:",
 }
@@ -51,6 +56,7 @@ type StatData struct {
 	DiskTotal uint64  `json:"disk_total"`
 	NetSent   float64 `json:"net_sent"`
 	NetRecv   float64 `json:"net_recv"`
+	AgentVer  string  `json:"agent_ver"`
 }
 
 func main() {
@@ -125,6 +131,8 @@ func connectAndServe() error {
 				interval = secs
 				fmt.Printf("[Agent] 上报频率已更新为 %s\n", interval)
 			}
+		case "monitor_config":
+			applyMonitorConfig(conn, &writeMutex, agentID, msg.Data)
 		case "cmd":
 			if !verifyCommand(secret, msg.AgentID, msg.Data, msg.Nonce, msg.Sig) {
 				fmt.Println("[Agent] 命令签名校验失败，已丢弃")
@@ -231,6 +239,7 @@ func collectStats(netSampler *netSampler) StatData {
 		Uptime: uptimeVal,
 		CPUCount: cpuCount, MemTotal: memTotal, DiskTotal: diskTotal,
 		NetSent: netSent, NetRecv: netRecv,
+		AgentVer: AgentVersion,
 	}
 }
 
@@ -305,4 +314,135 @@ func writeJSON(conn *websocket.Conn, writeMutex *sync.Mutex, message Message) {
 	writeMutex.Lock()
 	defer writeMutex.Unlock()
 	conn.WriteJSON(message)
+}
+
+// ════════════════════════════════════════════════════════════
+//  Ping/延迟监控探测
+// ════════════════════════════════════════════════════════════
+
+type Monitor struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`     // tcp | http | icmp
+	Target   string `json:"target"`
+	Interval int    `json:"interval"` // 秒
+	AgentID  string `json:"agent_id"`
+}
+
+var (
+	proberMu     sync.Mutex
+	proberCancel context.CancelFunc
+)
+
+// applyMonitorConfig 收到 master 下发的监控列表后，重置全部探测器。
+func applyMonitorConfig(conn *websocket.Conn, wm *sync.Mutex, agentID, data string) {
+	var list []Monitor
+	if json.Unmarshal([]byte(data), &list) != nil {
+		return
+	}
+	proberMu.Lock()
+	if proberCancel != nil {
+		proberCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	proberCancel = cancel
+	proberMu.Unlock()
+
+	fmt.Printf("[Agent] 收到 %d 个探测任务\n", len(list))
+	for _, m := range list {
+		go runProber(ctx, conn, wm, agentID, m)
+	}
+}
+
+func runProber(ctx context.Context, conn *websocket.Conn, wm *sync.Mutex, agentID string, m Monitor) {
+	iv := time.Duration(m.Interval) * time.Second
+	if iv < 5*time.Second {
+		iv = 30 * time.Second
+	}
+	for {
+		up, lat := probe(ctx, m)
+		res := struct {
+			MonitorID string  `json:"monitor_id"`
+			Up        bool    `json:"up"`
+			LatencyMs float64 `json:"latency_ms"`
+			TS        int64   `json:"ts"`
+		}{m.ID, up, lat, time.Now().Unix()}
+		b, _ := json.Marshal(res)
+		writeJSON(conn, wm, Message{Type: "probe_result", AgentID: agentID, Data: string(b)})
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(iv):
+		}
+	}
+}
+
+// probe 执行一次探测，返回是否可达与延迟（毫秒）。
+func probe(ctx context.Context, m Monitor) (bool, float64) {
+	switch m.Type {
+	case "tcp":
+		return probeTCP(m.Target)
+	case "http":
+		return probeHTTP(ctx, m.Target)
+	case "icmp":
+		return probeICMP(ctx, m.Target)
+	}
+	return false, 0
+}
+
+func probeTCP(target string) (bool, float64) {
+	start := time.Now()
+	c, err := net.DialTimeout("tcp", target, 5*time.Second)
+	if err != nil {
+		return false, 0
+	}
+	c.Close()
+	return true, float64(time.Since(start).Microseconds()) / 1000
+}
+
+func probeHTTP(ctx context.Context, target string) (bool, float64) {
+	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+		target = "http://" + target
+	}
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, target, nil)
+	if err != nil {
+		return false, 0
+	}
+	client := http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, 0
+	}
+	defer resp.Body.Close()
+	lat := float64(time.Since(start).Microseconds()) / 1000
+	return resp.StatusCode < 400, lat
+}
+
+// probeICMP 通过系统 ping 命令实现（无需 raw socket / root）。
+func probeICMP(ctx context.Context, host string) (bool, float64) {
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(cctx, "ping", "-c", "1", "-W", "2", host).Output()
+	if err != nil {
+		return false, 0
+	}
+	// 解析 "time=12.3 ms"
+	s := string(out)
+	i := strings.Index(s, "time=")
+	if i < 0 {
+		return true, 0
+	}
+	rest := s[i+5:]
+	j := strings.IndexByte(rest, ' ')
+	if j < 0 {
+		return true, 0
+	}
+	var ms float64
+	if _, err := fmt.Sscanf(strings.TrimSpace(rest[:j]), "%f", &ms); err != nil {
+		return true, 0
+	}
+	return true, ms
 }

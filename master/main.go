@@ -94,6 +94,7 @@ func main() {
 	loadAlertsEarly()
 
 	registerRoutes()
+	go trafficAlertLoop()
 
 	totpEnabled := os.Getenv("OPERATOR_TOTP_SECRET") != ""
 	fmt.Println()
@@ -118,6 +119,9 @@ func registerRoutes() {
 	if err := loadGroups(groupsFile); err != nil {
 		log.Println("[警告] 加载分组失败:", err)
 	}
+	if err := loadMonitors(monitorsFile); err != nil {
+		log.Println("[警告] 加载监控配置失败:", err)
+	}
 
 	distFS, err := fsSub(frontendFiles, "dist")
 	if err != nil {
@@ -140,6 +144,8 @@ func registerRoutes() {
 	http.HandleFunc(masterPath+"/api/preferences", handlePreferences)
 	http.HandleFunc(masterPath+"/api/alerts", handleAlerts)
 	http.HandleFunc(masterPath+"/api/traffic", handleTraffic)
+	http.HandleFunc(masterPath+"/api/history", handleHistory)
+	http.HandleFunc(masterPath+"/api/monitors", handleMonitors)
 }
 
 // ============ Agent ============
@@ -172,7 +178,11 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	agentMutex.Unlock()
 	fmt.Printf("[Master] Agent 上线: %s\n", agentID)
 
+	// 按公网 IP 异步识别国家（仅当尚未设置）
+	maybeResolveCountry(agentID, r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+
 	sconn.Write(mustJSON(Message{Type: "config", AgentID: agentID, Data: fmt.Sprintf("%d", rec.Prefs.Interval)}))
+	pushMonitorConfig(agentID) // 下发该节点的探测任务
 
 	for {
 		_, msgBytes, err := conn.ReadMessage()
@@ -182,14 +192,10 @@ func handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case "stat":
 			if !rateAllow(agentID, time.Duration(rec.Prefs.Interval)*time.Second/2) { continue }
-			if rec.Prefs.TrackTraffic {
-				var sp struct{ Data string `json:"data"` }
-				if json.Unmarshal(msgBytes, &sp) == nil {
-					var v struct{ NetSent float64 `json:"net_sent"`; NetRecv float64 `json:"net_recv"` }
-					if json.Unmarshal([]byte(sp.Data), &v) == nil { RecordTraffic(agentID, v.NetSent, v.NetRecv) }
-				}
-			}
+			ingestStat(agentID, rec, msg.Data)
 			broadcastToWeb(msgBytes)
+		case "probe_result":
+			ingestProbeResult(agentID, msg.Data)
 		case "log":
 			broadcastToWeb(msgBytes)
 		}
@@ -209,6 +215,24 @@ func rateAllow(agentID string, minGap time.Duration) bool {
 	now := time.Now()
 	if last, ok := lastStatTime[agentID]; ok && now.Sub(last) < minGap { return false }
 	lastStatTime[agentID] = now; return true
+}
+
+// ingestStat 解析一次 stat 负载，捕获 agent 版本、记录流量与历史时序。
+func ingestStat(agentID string, rec *AgentRecord, data string) {
+	var s struct {
+		CPU      float64 `json:"cpu"`
+		Mem      float64 `json:"mem"`
+		Disk     float64 `json:"disk"`
+		NetSent  float64 `json:"net_sent"`
+		NetRecv  float64 `json:"net_recv"`
+		AgentVer string  `json:"agent_ver"`
+	}
+	if json.Unmarshal([]byte(data), &s) != nil { return }
+	if s.AgentVer != "" && rec.AgentVer != s.AgentVer {
+		agentsMu.Lock(); rec.AgentVer = s.AgentVer; agentsMu.Unlock()
+	}
+	if rec.Prefs.TrackTraffic { RecordTraffic(agentID, s.NetSent, s.NetRecv) }
+	recordHistory(agentID, s.CPU, s.Mem, s.Disk, s.NetSent, s.NetRecv)
 }
 
 // ============ Viewer ============
@@ -339,7 +363,29 @@ func handleAgents(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(AgentList())
+	case http.MethodPut:
+		if !operatorAuthorized(r) {
+			http.Error(w, "未授权", http.StatusUnauthorized); return
+		}
+		var req struct {
+			AgentID string           `json:"agent_id"`
+			Name    string           `json:"name"`
+			Prefs   AgentPreferences `json:"prefs"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest); return
+		}
+		if err := UpdateAgentMeta(req.AgentID, req.Name, req.Prefs); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest); return
+		}
+		// 刷新频率可能变了，若在线则下发新 config
+		agentMutex.RLock(); sconn, online := agentConns[req.AgentID]; agentMutex.RUnlock()
+		if online { sconn.Write(mustJSON(Message{Type: "config", AgentID: req.AgentID, Data: fmt.Sprintf("%d", req.Prefs.Interval)})) }
+		w.WriteHeader(http.StatusOK)
 	case http.MethodDelete:
+		if !operatorAuthorized(r) {
+			http.Error(w, "未授权", http.StatusUnauthorized); return
+		}
 		var req struct{ AgentID string `json:"agent_id"` }
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid body", http.StatusBadRequest); return
@@ -423,51 +469,145 @@ func handleAlerts(w http.ResponseWriter, r *http.Request) {
 type TrafficDay struct{ Date string `json:"date"`; Sent int64 `json:"sent"`; Recv int64 `json:"recv"` }
 
 type TrafficStats struct {
-	AgentID, Group, Name string
-	Total, Today, ThisMonth, DailySent, DailyRecv int64
+	AgentID   string `json:"agent_id"`
+	Group     string `json:"group"`
+	Name      string `json:"name"`
+	Today     int64  `json:"today"`      // 今日字节
+	ThisMonth int64  `json:"this_month"` // 本自然月字节
+	CycleUsed int64  `json:"cycle_used"` // 本计费周期已用（有重置日时）
+	Quota     int64  `json:"quota"`      // 配额字节，0=不限
+	ResetDay  int    `json:"reset_day"`
 }
 
 var (
-	trafficMu sync.RWMutex
-	traffic   = make(map[string]*TrafficDay)
+	trafficMu     sync.RWMutex
+	traffic       = make(map[string]*TrafficDay)
+	lastTrafficAt = make(map[string]time.Time)
 )
 
-func RecordTraffic(agentID string, sent, recv float64) {
+// RecordTraffic 对速率（字节/秒）按实际区间积分为字节量并按天累计。
+func RecordTraffic(agentID string, sentRate, recvRate float64) {
 	trafficMu.Lock(); defer trafficMu.Unlock()
-	now := time.Now(); key := agentID + "|" + now.Format("2006-01-02")
+	now := time.Now()
+	last, ok := lastTrafficAt[agentID]
+	lastTrafficAt[agentID] = now
+	if !ok { return } // 首个样本没有区间，跳过
+	elapsed := now.Sub(last).Seconds()
+	if elapsed <= 0 || elapsed > 300 { return } // 断连/异常区间丢弃
+	key := agentID + "|" + now.Format("2006-01-02")
 	day := traffic[key]
 	if day == nil { day = &TrafficDay{Date: now.Format("2006-01-02")}; traffic[key] = day }
-	day.Sent += int64(sent); day.Recv += int64(recv)
+	day.Sent += int64(sentRate * elapsed)
+	day.Recv += int64(recvRate * elapsed)
 	for k := range traffic {
 		parts := strings.SplitN(k, "|", 2)
 		if len(parts) != 2 { continue }
 		d, err := time.Parse("2006-01-02", parts[1])
-		if err == nil && time.Since(d) > 30*24*time.Hour { delete(traffic, k) }
+		if err == nil && time.Since(d) > 40*24*time.Hour { delete(traffic, k) }
 	}
+}
+
+// cycleStartDate 计算按 resetDay 划分的当前计费周期起始日。
+func cycleStartDate(now time.Time, resetDay int) time.Time {
+	if resetDay < 1 { resetDay = 1 }
+	if resetDay > 28 { resetDay = 28 } // 夹到 28 避免月份天数不足
+	y, mth, d := now.Date()
+	if d >= resetDay {
+		return time.Date(y, mth, resetDay, 0, 0, 0, 0, now.Location())
+	}
+	prev := time.Date(y, mth, 1, 0, 0, 0, 0, now.Location()).AddDate(0, -1, 0)
+	return time.Date(prev.Year(), prev.Month(), resetDay, 0, 0, 0, 0, now.Location())
+}
+
+func trafficStatsSnapshot() []*TrafficStats {
+	agentsMu.RLock()
+	recs := make([]*AgentRecord, 0, len(agents))
+	for _, a := range agents { recs = append(recs, a) }
+	agentsMu.RUnlock()
+
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	monthPrefix := now.Format("2006-01")
+
+	trafficMu.RLock(); defer trafficMu.RUnlock()
+	out := make([]*TrafficStats, 0, len(recs))
+	for _, rec := range recs {
+		id := rec.AgentID
+		var todayB, monthB, cycleB int64
+		cycleStart := ""
+		if rec.Prefs.TrafficResetDay > 0 {
+			cycleStart = cycleStartDate(now, rec.Prefs.TrafficResetDay).Format("2006-01-02")
+		}
+		for k, d := range traffic {
+			if !strings.HasPrefix(k, id+"|") { continue }
+			total := d.Sent + d.Recv
+			if d.Date == today { todayB += total }
+			if strings.HasPrefix(d.Date, monthPrefix) { monthB += total }
+			if cycleStart != "" && d.Date >= cycleStart { cycleB += total } // YYYY-MM-DD 可字典序比较
+		}
+		if cycleStart == "" { cycleB = monthB } // 无重置日 → 用自然月
+		out = append(out, &TrafficStats{
+			AgentID: id, Group: rec.Prefs.Group, Name: rec.Name,
+			Today: todayB, ThisMonth: monthB, CycleUsed: cycleB,
+			Quota: rec.Prefs.TrafficQuota, ResetDay: rec.Prefs.TrafficResetDay,
+		})
+	}
+	return out
 }
 
 func handleTraffic(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return
 	}
-	agentsMu.RLock()
-	records := make(map[string]*AgentRecord)
-	for _, a := range agents { records[a.AgentID] = a }
-	agentsMu.RUnlock()
-
-	trafficMu.RLock()
-	now := time.Now(); today := now.Format("2006-01-02")
-	stats := make([]*TrafficStats, 0, len(records))
-	for id, rec := range records {
-		day := traffic[id+"|"+today]
-		var ts, tr int64
-		if day != nil { ts = day.Sent; tr = day.Recv }
-		stats = append(stats, &TrafficStats{AgentID: id, Group: rec.Prefs.Group, Name: rec.Name, Total: ts + tr, Today: ts + tr, ThisMonth: ts + tr, DailySent: ts, DailyRecv: tr})
-	}
-	trafficMu.RUnlock()
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	json.NewEncoder(w).Encode(trafficStatsSnapshot())
+}
+
+// ── 流量超额告警（每周期每节点仅告警一次）──
+
+var (
+	trafficAlertMu sync.Mutex
+	trafficAlerted = make(map[string]string) // agentID -> 已告警的周期 key
+)
+
+func trafficAlertLoop() {
+	for range time.Tick(5 * time.Minute) {
+		checkTrafficQuota()
+	}
+}
+
+func checkTrafficQuota() {
+	now := time.Now()
+	for _, s := range trafficStatsSnapshot() {
+		if s.Quota <= 0 || s.CycleUsed < s.Quota { continue }
+		cycleKey := now.Format("2006-01")
+		if s.ResetDay > 0 { cycleKey = cycleStartDate(now, s.ResetDay).Format("2006-01-02") }
+		trafficAlertMu.Lock()
+		already := trafficAlerted[s.AgentID] == cycleKey
+		if !already { trafficAlerted[s.AgentID] = cycleKey }
+		trafficAlertMu.Unlock()
+		if already { continue }
+		name := s.Name; if name == "" { name = s.AgentID }
+		sendTGAlert(fmt.Sprintf("⚠️ 流量超额：%s 本周期已用 %s / 配额 %s", name, humanBytes(s.CycleUsed), humanBytes(s.Quota)))
+	}
+}
+
+func sendTGAlert(text string) {
+	if bot == nil { return }
+	for _, s := range strings.Split(os.Getenv("TG_ADMIN_IDS"), ",") {
+		s = strings.TrimSpace(s)
+		if id, err := strconv.ParseInt(s, 10, 64); err == nil {
+			_, _ = bot.Send(tele.ChatID(id), text)
+		}
+	}
+}
+
+func humanBytes(b int64) string {
+	f := float64(b)
+	units := []string{"B", "KB", "MB", "GB", "TB", "PB"}
+	i := 0
+	for f >= 1024 && i < len(units)-1 { f /= 1024; i++ }
+	return fmt.Sprintf("%.2f %s", f, units[i])
 }
 
 func loadAlertsEarly() {

@@ -1,27 +1,21 @@
 <template>
-  <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides">
+  <NConfigProvider :theme="naiveTheme" :theme-overrides="overrides">
     <NMessageProvider>
-      <DashboardView />
+      <NDialogProvider>
+        <DashboardView />
+      </NDialogProvider>
     </NMessageProvider>
   </NConfigProvider>
 </template>
 
 <script setup lang="ts">
-import { NConfigProvider, NMessageProvider, darkTheme, type GlobalThemeOverrides } from "naive-ui";
+import { computed, onMounted } from "vue";
+import { NConfigProvider, NDialogProvider, NMessageProvider, darkTheme, lightTheme } from "naive-ui";
 import DashboardView from "./views/dashboard/index.vue";
+import { applyTheme, isLight, naiveOverrides, themeKey } from "./theme";
 
-const themeOverrides: GlobalThemeOverrides = {
-  common: {
-    primaryColor: "#18a058",
-    primaryColorHover: "#36ad6a",
-    bodyColor: "#0f1117",
-    cardColor: "#171a22",
-    modalColor: "#171a22",
-    borderColor: "#2b3140",
-    textColorBase: "#e5e7eb",
-  },
-  Card: {
-    borderRadius: "8px",
-  },
-};
+const naiveTheme = computed(() => (isLight(themeKey.value) ? lightTheme : darkTheme));
+const overrides = computed(() => naiveOverrides(themeKey.value));
+
+onMounted(() => applyTheme(themeKey.value));
 </script>

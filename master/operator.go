@@ -4,7 +4,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 )
+
+// operatorAuthorized 校验请求头里的 Bearer access_token 是否有效。
+func operatorAuthorized(r *http.Request) bool {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
+	_, ok := verifyAccessToken(token)
+	return ok
+}
 
 func initOperatorAuth() {
 	// JWT 密钥

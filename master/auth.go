@@ -24,12 +24,25 @@ type AgentPreferences struct {
 	TrackTraffic bool   `json:"track_traffic"`
 	DailyReport  bool   `json:"daily_report"`
 	Interval     int    `json:"interval"`
+
+	// ── 手动元数据（节点编辑表单录入）──
+	PriceAmount     float64 `json:"price_amount,omitempty"`      // 价格金额
+	PriceCurrency   string  `json:"price_currency,omitempty"`    // 货币：$/¥/€ 等
+	BillingCycle    string  `json:"billing_cycle,omitempty"`     // 月/年/一次性/免费
+	ExpiryDate      string  `json:"expiry_date,omitempty"`       // 到期日 YYYY-MM-DD（前端算剩余天数）
+	Label           string  `json:"label,omitempty"`             // 计费标签（主用/长租/玩具…）
+	TrafficQuota    int64   `json:"traffic_quota,omitempty"`     // 流量配额（字节，0=不限）
+	TrafficResetDay int     `json:"traffic_reset_day,omitempty"` // 每月流量重置日 1-31
+	CountryCode     string  `json:"country_code,omitempty"`      // ISO alpha-2（geo-IP 或手动覆盖）
+	Favorite        bool    `json:"favorite,omitempty"`          // 收藏 ★
+	SortOrder       int     `json:"sort_order,omitempty"`        // 手动排序
 }
 
 type AgentRecord struct {
 	AgentID   string           `json:"agent_id"`
 	Secret    string           `json:"secret"`
 	Name      string           `json:"name"`
+	AgentVer  string           `json:"agent_ver,omitempty"` // agent 上报的版本号
 	Prefs     AgentPreferences `json:"prefs"`
 	LastStat  map[string]any   `json:"-"`
 	Connected bool             `json:"-"`
@@ -77,6 +90,7 @@ func saveAgents(path string) error {
 type EnrollRequest struct {
 	Name string `json:"name"`; Group string `json:"group"`
 	EnableConsole bool `json:"enable_console"`; TrackTraffic bool `json:"track_traffic"`; DailyReport bool `json:"daily_report"`
+	Interval int `json:"interval"`
 }
 
 func enrollAgent(req EnrollRequest, masterAddr string) (*AgentRecord, string, error) {
@@ -87,6 +101,7 @@ func enrollAgent(req EnrollRequest, masterAddr string) (*AgentRecord, string, er
 	rec := NewAgentRecord()
 	if req.Name != "" { rec.Name = req.Name }; if req.Group != "" { rec.Prefs.Group = req.Group }
 	rec.Prefs.EnableConsole = req.EnableConsole; rec.Prefs.TrackTraffic = req.TrackTraffic; rec.Prefs.DailyReport = req.DailyReport
+	if req.Interval >= minInterval && req.Interval <= maxInterval { rec.Prefs.Interval = req.Interval }
 	agents[rec.AgentID] = rec
 	if err := saveAgents(agentsFile); err != nil { delete(agents, rec.AgentID); return nil, "", err }
 	return rec, buildInstallCmd(rec, masterAddr), nil
@@ -183,6 +198,16 @@ func SetAgentPrefs(agentID string, prefs AgentPreferences) error {
 	agentsMu.Lock(); defer agentsMu.Unlock()
 	rec, ok := agents[agentID]; if !ok { return fmt.Errorf("agent 不存在: %s", agentID) }
 	rec.Prefs = prefs; return saveAgents(agentsFile)
+}
+
+// UpdateAgentMeta 更新节点的名称与全部偏好/元数据（节点编辑表单）。
+func UpdateAgentMeta(agentID, name string, prefs AgentPreferences) error {
+	agentsMu.Lock(); defer agentsMu.Unlock()
+	rec, ok := agents[agentID]; if !ok { return fmt.Errorf("agent 不存在: %s", agentID) }
+	if prefs.Interval < minInterval || prefs.Interval > maxInterval { prefs.Interval = rec.Prefs.Interval }
+	if prefs.CountryCode != "" { prefs.CountryCode = strings.ToUpper(prefs.CountryCode) }
+	rec.Name = name; rec.Prefs = prefs
+	return saveAgents(agentsFile)
 }
 
 func AgentList() []*AgentRecord { agentsMu.RLock(); defer agentsMu.RUnlock(); l := make([]*AgentRecord, 0, len(agents)); for _, a := range agents { l = append(l, a) }; return l }
